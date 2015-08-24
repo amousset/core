@@ -1242,6 +1242,8 @@ void EvalContextStackPushPromiseFrame(EvalContext *ctx, const Promise *owner, bo
     xsnprintf(v, sizeof(v), "%d", (int) ctx->ppid);
     EvalContextVariablePutSpecial(ctx, SPECIAL_SCOPE_THIS, "promiser_ppid", v, CF_DATA_TYPE_INT, "source=agent");
 
+    EvalContextVariablePutSpecial(ctx, SPECIAL_SCOPE_THIS, "context", GetStackContext(ctx), CF_DATA_TYPE_CONTAINER, "source=promise");
+
     EvalContextVariablePutSpecial(ctx, SPECIAL_SCOPE_THIS, "bundle", PromiseGetBundle(owner)->name, CF_DATA_TYPE_STRING, "source=promise");
     EvalContextVariablePutSpecial(ctx, SPECIAL_SCOPE_THIS, "namespace", PromiseGetNamespace(owner), CF_DATA_TYPE_STRING, "source=promise");
 }
@@ -1257,16 +1259,24 @@ JsonElement *GetStackContext(EvalContext *ctx) {
 	    case STACK_FRAME_TYPE_BODY:
 	        break;
  	    case STACK_FRAME_TYPE_BUNDLE:
-	        break;
+ 	    {
+ 	    	JsonElement *inner = JsonObjectCreate(10);
+ 	    	JsonObjectAppendString(inner, "name", frame->data.bundle.owner->name);
+ 	    	JsonArrayAppendObject(stack, inner);
+ 	   	    break;
+ 	    }
  	    case STACK_FRAME_TYPE_PROMISE_ITERATION:
 	        break;
  	    case STACK_FRAME_TYPE_PROMISE:
  	    {
  	    	JsonElement *inner = JsonObjectCreate(10);
- 	    	JsonObjectAppendString(inner, "promiser", frame->data.promise.owner->promiser);
-	     	//if (strcmp(frame->data.promise.owner->parent_promise_type->name, "methods") == 0) {
-	     	//	RlistAppendScalar(&callers, frame->data.promise.owner->promiser);
-	      	//
+ 	    	JsonElement *type = JsonObjectCreate(10);
+ 	    	JsonElement *promiser = JsonObjectCreate(10);
+ 	    	JsonElement *promise = JsonObjectCreate(10);
+
+ 	    	JsonObjectAppendString(type, "promiser", frame->data.promise.owner->promiser);
+ 	    	JsonObjectAppendObject(promise, frame->data.promise.owner->parent_promise_type->name, type);
+ 	    	JsonObjectAppendObject(inner, "promise", promise);
  	    	JsonArrayAppendObject(stack, inner);
 	        break;
  	    }
