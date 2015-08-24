@@ -24,14 +24,6 @@ bundle agent test
   "headers": [ "Foo: bar" ]
 }';
 
-      "options2" data => '---
-a: b
-c: d
-e:
-  - 1
-  - 2
-';
-
       "options3" data => '
 {
   "max_content": 512,
@@ -39,13 +31,14 @@ e:
   "headers": [ "Foo: bar" ]
 }';
 
-      "options4" data => '---
-a: $(included)
-c: d
-e:
-  - 1
-  - 2
-';
+      # same as options3 but with bareword keys
+      "options4" data => '
+{
+  max_content: 512,
+  verbose: "$(included)",
+  headers: [ "Foo: bar" ]
+}';
+
 }
 
 #######################################################

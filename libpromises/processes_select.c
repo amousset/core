@@ -339,8 +339,9 @@ static int SelectProcTimeCounterRangeMatch(char *name1, char *name2, time_t min,
 
         if (value == CF_NOINT)
         {
-            Log(LOG_LEVEL_INFO, "Failed to extract a valid integer from %c => '%s' in process list", name1[i],
-                  line[i]);
+            Log(LOG_LEVEL_INFO,
+                "Failed to extract a valid integer from %c => '%s' in process list",
+                name1[i], line[i]);
             return false;
         }
 
@@ -842,6 +843,12 @@ static int SplitProcLine(const char *proc, time_t pstime,
                 xasprintf(line + j, "%ld", value);
             }
         }
+        else if (line[k])
+        {
+            Log(LOG_LEVEL_VERBOSE,
+                "Parsing problem was in ELAPSED field of '%s'",
+                proc);
+        }
     }
 
     return true;
@@ -945,9 +952,20 @@ static void GetProcessColumnNames(const char *proc, char **names, int *start, in
             {
                 Log(LOG_LEVEL_DEBUG, "End of '%s' is %d", title, offset - 1);
                 end[col++] = offset - 1;
-                if (col > CF_PROCCOLS - 1)
+                if (col >= CF_PROCCOLS) /* No space for more columns. */
                 {
-                    Log(LOG_LEVEL_ERR, "Column overflow in process table");
+                    size_t blank = strspn(sp, " \t\r\n\f\v");
+                    if (sp[blank]) /* i.e. that wasn't everything. */
+                    {
+                        /* If this happens, we have more columns in
+                         * our ps output than space to store them.
+                         * Update the #define CF_PROCCOLS (last seen
+                         * in libpromises/cf3.defs.h) to a bigger
+                         * number ! */
+                        Log(LOG_LEVEL_ERR,
+                            "Process table lacks space for last columns: %s",
+                            sp + blank);
+                    }
                     break;
                 }
             }

@@ -24,8 +24,6 @@
 
 #include <platform.h>
 #include <cfnet.h>                                            /* CF_BUFSIZE */
-#include <cf3.defs.h>
-#include <cf3.extern.h>                                    /* BINDINTERFACE */
 #include <net.h>
 #include <classic.h>
 #include <tls_generic.h>
@@ -33,6 +31,9 @@
 #include <logging.h>
 #include <misc_lib.h>
 
+
+/* TODO remove libpromises dependency. */
+extern char BINDINTERFACE[];                  /* cf3globals.c, cf3.extern.h */
 
 
 /**
@@ -44,6 +45,7 @@
  *       does not allow empty transactions! The reason is that
  *       ReceiveTransaction() can't differentiate between that
  *       and connection closed.
+ * @NOTE (len <= CF_BUFSIZE - CF_INBAND_OFFSET)
  */
 int SendTransaction(const ConnectionInfo *conn_info,
                     const char *buffer, int len, char status)
@@ -58,7 +60,9 @@ int SendTransaction(const ConnectionInfo *conn_info,
         len = strlen(buffer);
     }
 
-    assert(len > 0);            /* Not allowed to send zero-payload packets */
+    /* Not allowed to send zero-payload packets, because
+       (ReceiveTransaction() == 0) currently means connection closed. */
+    assert(len > 0);
 
     if (len > CF_BUFSIZE - CF_INBAND_OFFSET)
     {
@@ -113,6 +117,9 @@ int SendTransaction(const ConnectionInfo *conn_info,
 /*************************************************************************/
 
 /**
+ *  Receive a transaction packet of at most CF_BUFSIZE-1 bytes, and
+ *  NULL-terminate it.
+ *
  *  @return 0 in case of socket closed, -1 in case of other error, or
  *          >0 the number of bytes read.
  */
@@ -174,6 +181,8 @@ int ReceiveTransaction(const ConnectionInfo *conn_info, char *buffer, int *more)
     }
     else if (len <= 0)
     {
+        /* Zero-length packets are disallowed, because
+         * ReceiveTransaction() == 0 currently means connection closed. */
         Log(LOG_LEVEL_ERR,
             "ReceiveTransaction: packet too short (len=%d)", len);
         return -1;
@@ -210,17 +219,21 @@ int ReceiveTransaction(const ConnectionInfo *conn_info, char *buffer, int *more)
         ret = -1;
     }
 
-    LogRaw(LOG_LEVEL_DEBUG, "ReceiveTransaction data: ", buffer, ret);
-
-    /* Should never happen given that we are using SSL_MODE_AUTO_RETRY and
-     * that transaction payload < CF_BUFSIZE < TLS record size. */
-    if (ret > 0 && ret < len)
+    if (ret == -1 || ret == 0)
     {
+        return ret;
+    }
+    else if (ret != len)
+    {
+        /* Should never happen given that we are using SSL_MODE_AUTO_RETRY and
+         * that transaction payload < CF_BUFSIZE < TLS record size. */
         Log(LOG_LEVEL_ERR,
-            "Partial transaction read %d < %d bytes!",
+            "Partial transaction read %d != %d bytes!",
             ret, len);
         return -1;
     }
+
+    LogRaw(LOG_LEVEL_DEBUG, "ReceiveTransaction data: ", buffer, ret);
 
     return ret;
 }
@@ -246,7 +259,7 @@ uint32_t bwlimit_kbytes = 0; /* desired limit, in kB/s */
 
 /** Throttle traffic, if next packet happens too soon after the previous one
  * 
- *  This function is global, accross all network operations (and interfaces, perhaps)
+ *  This function is global, across all network operations (and interfaces, perhaps)
  *  @param tosend Length of current packet being sent out (in bytes)
  */
 
@@ -642,7 +655,7 @@ int SetReceiveTimeout(int fd, unsigned long ms)
 
     if (ret != 0)
     {
-        Log(LOG_LEVEL_INFO,
+        Log(LOG_LEVEL_VERBOSE,
             "Failed to set socket timeout to %lu milliseconds.", ms);
         return -1;
     }

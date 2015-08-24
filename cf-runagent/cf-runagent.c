@@ -125,7 +125,7 @@ static const char *const HINTS[] =
     "Define a list of comma separated classes to be sent to a remote agent",
     "Define a list of comma separated classes to be used to select remote agents by constraint",
     "Print basic information about changes made to the system, i.e. promises repaired",
-    "Pass options to a remote server process",
+    "(deprecated)",
     "Activate internal diagnostics (developers only)",
     "Hail the following comma-separated lists of hosts, overriding default list",
     "Enable interactive mode for key trust",
@@ -142,7 +142,6 @@ int OUTPUT_TO_FILE = false; /* GLOBAL_P */
 char OUTPUT_DIRECTORY[CF_BUFSIZE] = ""; /* GLOBAL_P */
 int BACKGROUND = false; /* GLOBAL_P GLOBAL_A */
 int MAXCHILD = 50; /* GLOBAL_P GLOBAL_A */
-char REMOTE_AGENT_OPTIONS[CF_MAXVARSIZE] = ""; /* GLOBAL_A */
 
 const Rlist *HOSTLIST = NULL; /* GLOBAL_P GLOBAL_A */
 char SENDCLASSES[CF_MAXVARSIZE] = ""; /* GLOBAL_A */
@@ -165,7 +164,9 @@ int main(int argc, char *argv[])
     GenericAgentDiscoverContext(ctx, config);
     Policy *policy = LoadPolicy(ctx, config);
 
+    GenericAgentPostLoadInit(ctx);
     ThisAgentInit();
+
     KeepControlPromises(ctx, policy);      // Set RUNATTR using copy
 
     if (BACKGROUND && INTERACTIVE)
@@ -302,7 +303,9 @@ static GenericAgentConfig *CheckOpts(int argc, char **argv)
             break;
 
         case 'o':
-            strlcpy(REMOTE_AGENT_OPTIONS, optarg, CF_MAXVARSIZE);
+            Log(LOG_LEVEL_ERR, "Option \"-o\" has been deprecated,"
+                " you can not pass arbitrary arguments to remote cf-agent");
+            exit(EXIT_FAILURE);
             break;
 
         case 'I':
@@ -394,13 +397,6 @@ static GenericAgentConfig *CheckOpts(int argc, char **argv)
 static void ThisAgentInit(void)
 {
     umask(077);
-
-    if (strstr(REMOTE_AGENT_OPTIONS, "--file") || strstr(REMOTE_AGENT_OPTIONS, "-f"))
-    {
-        Log(LOG_LEVEL_ERR,
-            "The specified remote options include a useless --file option. The remote server has promised to ignore this, thus it is disallowed.");
-        exit(EXIT_FAILURE);
-    }
 }
 
 /********************************************************************/
@@ -448,6 +444,9 @@ static int HailServer(const EvalContext *ctx, const GenericAgentConfig *config,
         gotkey = HavePublicKey(user, ipaddr, hostkey) != NULL;
         if (!gotkey)
         {
+            /* TODO print the hash of the connecting host. But to do that we
+             * should open the connection first, and somehow pass that hash
+             * here! redmine#7212 */
             printf("WARNING - You do not have a public key from host %s = %s\n",
                    hostname, ipaddr);
             printf("          Do you want to accept one on trust? (yes/no)\n\n--> ");
@@ -488,16 +487,18 @@ static int HailServer(const EvalContext *ctx, const GenericAgentConfig *config,
 #ifndef __MINGW32__
     if (BACKGROUND)
     {
-        Log(LOG_LEVEL_INFO, "Hailing '%s' : %s, with options '%s' (parallel)", hostname, port,
-            REMOTE_AGENT_OPTIONS);
+        Log(LOG_LEVEL_INFO, "Hailing %s : %s (in the background)",
+            hostname, port);
     }
     else
 #endif
     {
-        Log(LOG_LEVEL_INFO, "...........................................................................");
-        Log(LOG_LEVEL_INFO, " * Hailing %s : %s, with options \"%s\" (serial)", hostname, port,
-            REMOTE_AGENT_OPTIONS);
-        Log(LOG_LEVEL_INFO, "...........................................................................");
+        Log(LOG_LEVEL_INFO,
+            "........................................................................");
+        Log(LOG_LEVEL_INFO, "Hailing %s : %s",
+            hostname, port);
+        Log(LOG_LEVEL_INFO,
+            "........................................................................");
     }
 
     ConnectionFlags connflags = {
@@ -509,7 +510,7 @@ static int HailServer(const EvalContext *ctx, const GenericAgentConfig *config,
 
     if (conn == NULL)
     {
-        Log(LOG_LEVEL_VERBOSE, "No suitable server responded to hail");
+        Log(LOG_LEVEL_ERR, "Failed to connect to host: %s", hostname);
         return false;
     }
 
@@ -661,17 +662,13 @@ static void SendClassData(AgentConnection *conn)
 
 static void HailExec(AgentConnection *conn, char *peer, char *recvbuffer, char *sendbuffer)
 {
-    FILE *fp = stdout;
-    char *sp;
-    int n_read;
-
-    if (strlen(DEFINECLASSES))
+    if (DEFINECLASSES[0] != '\0')
     {
-        snprintf(sendbuffer, CF_BUFSIZE, "EXEC %s -D%s", REMOTE_AGENT_OPTIONS, DEFINECLASSES);
+        snprintf(sendbuffer, CF_BUFSIZE, "EXEC -D%s", DEFINECLASSES);
     }
     else
     {
-        snprintf(sendbuffer, CF_BUFSIZE, "EXEC %s", REMOTE_AGENT_OPTIONS);
+        snprintf(sendbuffer, CF_BUFSIZE, "EXEC");
     }
 
     if (SendTransaction(conn->conn_info, sendbuffer, 0, CF_DONE) == -1)
@@ -681,46 +678,57 @@ static void HailExec(AgentConnection *conn, char *peer, char *recvbuffer, char *
         return;
     }
 
-    fp = NewStream(peer);
+    /* TODO we are sending class data right after EXEC, when the server might
+     * have already rejected us with BAD reply. So this class data with the
+     * CFD_TERMINATOR will be interpreted by the server as a new, bogus
+     * protocol command, and the server will complain. */
     SendClassData(conn);
 
+    FILE *fp = NewStream(peer);
     while (true)
     {
         memset(recvbuffer, 0, CF_BUFSIZE);
 
-        if ((n_read = ReceiveTransaction(conn->conn_info, recvbuffer, NULL)) == -1)
-        {
-            return;
-        }
+        int n_read = ReceiveTransaction(conn->conn_info, recvbuffer, NULL);
 
-        if (n_read == 0)
+        if (n_read == -1)
+        {
+            break;
+        }
+        if (n_read == 0)                               /* connection closed */
+        {
+            break;
+        }
+        if (strncmp(recvbuffer, CFD_TERMINATOR, strlen(CFD_TERMINATOR)) == 0)
         {
             break;
         }
 
-        if (strlen(recvbuffer) == 0)
+        const size_t recv_len = strlen(recvbuffer);
+        const char   *ipaddr  = conn->remoteip;
+
+        if (strncmp(recvbuffer, "BAD:", 4) == 0)
         {
-            continue;
+            fprintf(fp, "%s> !! %s\n", ipaddr, recvbuffer + 4);
+        }
+        /* cf-serverd >= 3.7 quotes command output with "> ". */
+        else if (strncmp(recvbuffer, "> ", 2) == 0)
+        {
+            fprintf(fp, "%s> -> %s", ipaddr, &recvbuffer[2]);
+        }
+        else
+        {
+            fprintf(fp, "%s> %s", ipaddr, recvbuffer);
         }
 
-        if ((sp = strstr(recvbuffer, CFD_TERMINATOR)) != NULL)
+        if (recv_len > 0 && recvbuffer[recv_len - 1] != '\n')
         {
-            break;
+            /* We'll be printing double newlines here with new cf-serverd
+             * versions, so check for already trailing newlines. */
+            /* TODO deprecate this path in a couple of versions. cf-serverd is
+             * supposed to munch the newlines so we must always append one. */
+            fputc('\n', fp);
         }
-
-        if ((sp = strstr(recvbuffer, "BAD:")) != NULL)
-        {
-            fprintf(fp, "%s> !! %s\n", VPREFIX, recvbuffer + 4);
-            continue;
-        }
-
-        if (strstr(recvbuffer, "too soon"))
-        {
-            fprintf(fp, "%s> !! %s\n", VPREFIX, recvbuffer);
-            continue;
-        }
-
-        fprintf(fp, "%s> -> %s", VPREFIX, recvbuffer);
     }
 
     if (fp != stdout)
@@ -751,7 +759,7 @@ static FILE *NewStream(char *name)
 
     if (OUTPUT_TO_FILE)
     {
-        printf("Opening file...%s\n", filename);
+        printf("Opening file... %s\n", filename);
 
         if ((fp = fopen(filename, "w")) == NULL)
         {

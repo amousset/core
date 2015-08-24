@@ -117,15 +117,20 @@ coverage: clean-coverage run-coverage collect-coverage
 # so we need to generate it before everything else.
 ################################################################################
 BUILT_SOURCES = \
-	$(srcdir)/libpromises/enterprise_extension.c \
-	$(srcdir)/libpromises/enterprise_extension.h
-
-ENTERPRISE_EXTENSION_GENERATE = $(SED) -f $(srcdir)/libpromises/enterprise_extension.sed $< > $@
-ENTERPRISE_EXTENSION_MAKE = @if test -z "$(V)"; then echo "  SED   " $@; else echo "$(ENTERPRISE_EXTENSION_GENERATE)"; fi; $(ENTERPRISE_EXTENSION_GENERATE)
-$(srcdir)/libpromises/enterprise_extension.c: libpromises/extensions_template.c libpromises/enterprise_extension.sed
-	$(ENTERPRISE_EXTENSION_MAKE)
-$(srcdir)/libpromises/enterprise_extension.h: libpromises/extensions_template.h libpromises/enterprise_extension.sed
-	$(ENTERPRISE_EXTENSION_MAKE)
+       $(srcdir)/libpromises/enterprise_extension.c \
+       $(srcdir)/libpromises/enterprise_extension.h
+libpromises/enterprise_extension.c: libpromises/extensions_template.c.pre libpromises/enterprise_extension.sed
+	$(V_SED) $(SED) -f $(srcdir)/libpromises/enterprise_extension.sed $< > $@
+libpromises/enterprise_extension.h: libpromises/extensions_template.h.pre libpromises/enterprise_extension.sed
+	$(V_SED) $(SED) -f $(srcdir)/libpromises/enterprise_extension.sed $< > $@
+V_PERL = $(cf__v_PERL_$(V))
+cf__v_PERL_ = $(cf__v_PERL_$(AM_DEFAULT_VERBOSITY))
+cf__v_PERL_0 = @echo "  PERL    " "$@";
+cf__v_PERL_1 =
+V_SED = $(cf__v_SED_$(V))
+cf__v_SED_ = $(cf__v_SED_$(AM_DEFAULT_VERBOSITY))
+cf__v_SED_0 = @echo "  SED     " "$@";
+cf__v_SED_1 =
 
 
 #

@@ -1,22 +1,192 @@
-Cfengine Propulsion Lab
-        Changes:
-	- cf-execd: agent_expireafter default was changed to 120 minutes
-	  (Redmine #7113)
-        - all embedded databases are now rooted in the state/ directory.
-
+3.7.0:
         New features:
+        - New package promise implementation.
+          The syntax is much simpler, to try it out, check out the syntax:
+              packages:
+                  "mypackage"
+                    policy => "absent/present",
+
+                      # Optional, default taken from common control
+                    package_module => apt_get,
+
+                      # Optional, will only match exact version. May be
+                      # "latest".
+                    version => "32.0",
+
+                      # Optional.
+                    architecture => "x86_64";
+
+        - Full systemd support for all relevant platforms
+        - New classes to determine whether certain features are enabled:
+            * feature_yaml
+            * feature_xml
+          For the official CFEngine packages, these are always enabled, but
+          packages from other sources may be built without the support.
+        - New readdata() support for generic data input (CSV, YAML, JSON, or auto)
+        - YAML support: new readyaml() function and in readdata()
+        - CSV support: new readcsv() function and in readdata()
+        - New string_mustache() function
+        - New data_regextract() function
+        - eval() can now be called with "class" as the "mode" argument, which
+          will cause it to return true ("any") if the calculated result is
+          non-zero, and false ("!any") if it is zero.
+        - New list_ifelse() function
+        - New mapjson() function as well as JSON support in maparray().
+        - filestat() function now supports "xattr" argument for extended
+          attributes.
+        - "ifvarclass" now has "if" as an alias, and "unless" as an inverse
+          alias.
+        - Ability to expand JSON variables directory in Mustache templates:
+          Prefix the name with '%' for multiline expansion, '$' for compact
+          expansion.
+        - Ability to expand the iteration *key* in Mustache templates with @
+        - Canonical JSON output: JSON output has reliably sorted keys so the
+          same data structure will produce the same JSON every time.
+        - New "@if minimum_version(x.x)" syntax in order to hide future language
+          improvements from versions that don't understand them.
         - compile time option (--with-statedir) to
           override the default state/ directory path.
-        - services/methods get a default
-          bundle name -> method|service_Canonify($(this.promiser)) -
-          must be in the same namespace as caller
-        - "ifvarclass" now has "if" as an alias
-        - Fix error messages/ hanndling in process signalling which no longer
+        - Fix error messages/ handling in process signalling which no longer
           allowed any signals to fail silently
-        - Fix output format
         - Also enable shortcut keyword for cf-serverd classic protocol, eg to
           simplify the bootstrap process for clients that have different
           sys.masterdir settings (Redmine #3697)
+        - methods promises now accepts the bundle name in the promiser string,
+          as long as it doesn't have any parameters.
+        - In a services promise, if the service_method bundle is not specified,
+          it defaults to the promiser string (canonified) with "service_" as a
+          prefix. The bundle must be in the same namespace as the promise.
+        - inline JSON in policy files: surrounding with parsejson() is now
+          optional *when creating a new data container*.
+        - New data_expand() function to interpolate variables in a data container.
+        - Add configurable network bandwidth limit for all outgoing
+          connections ("bwlimit" attribute in "body common control") . To
+          enforce it in both directions, make sure the attribute is set on both
+          sides of the connection.
+        - Secure bootstrap has been facilitated by use of
+          "cf-agent --boostrap HUB_ADDRESS --trust-server=no"
+        - Implement new TLS-relevant options (Redmine #6883):
+          - body common control: tls_min_version
+          - body server control: allowtlsversion
+          - body common control: tls_ciphers
+          - body server control: allowciphers (preexisting)
+
+        Changes:
+        - Improved output format, less verbose, and messages are grouped.
+        - cf-execd: agent_expireafter default was changed to 120 minutes
+          (Redmine #7113)
+        - All embedded databases are now rooted in the state/ directory.
+        - TLS used as default for all outgoing connections.
+        - process promise now reports kept status instead of repaired if a
+          signal is not sent, even if the restart_class is set. The old
+          behavior was to set the repaired status whenever the process was not
+          running. (Redmine#7216).
+        - Bootstrapping requires keys to be generated in advance using cf-key.
+        - Disable class set on reverse lookup of interfaces IP addresses.
+          (Redmine #3993, Redmine #6870)
+        - Define a hard class with just the OS major version on FreeBSD.
+        - Abort cf-agent if OpenSSL's random number generator can't
+          be seeded securely.
+        - Masterfiles source tarball now installs using the usual commands
+          "./configure; make install".
+        - Updated Emacs syntax highlighting template to support the latest
+          syntax enhancements in 3.7.
+
+        Deprecations:
+        - Arbitrary arguments to cfruncommand (using "cf-runagent -o") are
+          not acceptable any more. (Redmine #6978)
+        - 3.4 is no longer supported in masterfiles.
+
+        Bug fixes:
+        - Fix server common bundles evaluation order (Redmine#7211).
+        - Limit LMDB disk usage by preserving sparse areas in LMDB files
+          (Redmine#7242).
+        - Fixed LMDB corruption on HP-UX 11.23. (Redmine #6994)
+        - Fixed insert_lines failing to converge if preserve_block was used.
+          (Redmine #7094)
+        - Fixed init script failing to stop/restart daemons on openvz/lxc
+          hosts. (Redmine #3394)
+        - rm_rf_depth now deletes base directory as advertised. (Redmine #7009)
+        - Refactored cf-agent's connection cache to properly differentiate
+          hosts using all needed attributes like host and port.
+          (Redmine #4646)
+        - Refactored lastseen database handling to avoid inconsistencies.
+          (Redmine #6660)
+        - cf-key --trust-key now supports new syntax to also update the
+          lastseen database, so that clients using old protocol will trust
+          the server correctly.
+        - Fixed a bug which sometimes caused an agent or daemon to kill or stop
+          itself. (Redmine #7075, #7244)
+        - Fixed a bug which made it difficult to kill CFEngine daemons,
+          particularly cf-execd. (Redmine #6659, #7193)
+        - Fixed a bug causing systemd not to be detected correctly on Debian.
+          (Redmine #7297)
+        - "cf-promises -T" will now correctly report the checked out commit,
+          even if you haven't checked out a Git branch. (Redmine #7332)
+        - Reduce verbosity of harmless errors related to socket timeouts and
+          missing thermal zone files. (Redmine #6486 and #7238)
+
+        Masterfiles:
+
+        Added:
+        - Support for user specified overring of framework defaults without
+          modifying policy supplied by the framework itself (see
+          example_def.json)
+        - Support for def.json class augmentation in update policy
+        - Run vacuum operation on postgresql every night as a part of
+          maintenance.
+        - Add measure_promise_time action body to lib (3.5, 3.6, 3.7, 3.8)
+        - New negative class guard `cfengine_internal_disable_agent_email` so
+          that agent email can be easily disabled by augmenting def.json
+
+        Changed:
+        - Relocate def.cf to controls/VER/
+        - Relocate update_def to controls/VER
+        - Relocate all controls to controls/VER
+        - Only load cf_hub and reports.cf on CFEngine Enterprise installs
+        - Relocate acls related to report collection from bundle server
+          access_rules to controls/VER/reports.cf into bundle server
+          report_access_rules
+        - Re-organize cfe_internal splitting core from enterprise specific
+          policies and loading the appropriate inputs only when necessary
+        - Moved update directory into cfe_internal as it is not generally
+          intended to be modified
+        - services/autorun.cf moved to lib/VER/ as it is not generally intended
+          to be modified
+        - To improve predictibility autorun bundles are activated in
+          lexicographical order
+        - Relocate services/file_change.cf to cfe_internal/enterprise. This
+          policy is most useful for a good OOTB experience with CFEngine
+          Enterprise Mission Portal.
+        - Relocate service_catalogue from promsies.cf to services/main.cf. It is
+          intended to be a user entry. This name change correlates with the main
+          bundle being activated by default if there is no bundlesequence
+          specified.
+        - Reduce benchmarks sample history to 1 day.
+        - Update policy no longer generates a keypair if one is not found.
+          (Redmine: #7167)
+        - Relocate cfe_internal_postgresql_maintenance bundle to lib/VER/
+        - Set postgresql_monitoring_maintenance only for versions 3.6.0 and
+          3.6.1
+        - Move hub specific bundles from lib/VER/cfe_internal.cf into
+          lib/VER/cfe_internal_hub.cf and load them only if policy_server policy
+          if set.
+        - Re-organize lib/VER/stdlib.cf from lists into classic array for use
+          with getvalues
+
+        Removed:
+        - Diff reporting on /etc/shadow (Enterprise)
+        - Update policy from promise.cf inputs. There is no reason to include
+          the update policy into promsies.cf, update.cf is the entry for the
+          update policy
+        - _not_repaired outcome from classes_generic and scoped_classes generic
+          (Redmine: # 7022)
+
+        Fixes:
+        - standard_services now restarts the service if it was not already
+          running when using service_policy => restart with chkconfig (Redmine
+          #7258)
+
 
 3.6.5:
         Features:
@@ -53,7 +223,7 @@ Cfengine Propulsion Lab
           manager (Redmine #6807)
         - Fixed a bug in users promises which would sometimes set the wrong
           password hash if the user would also be unlocked at the same time.
-        - Fixed a bug on AIX which would occationally kill the wrong process.
+        - Fixed a bug on AIX which would occasionally kill the wrong process.
         - Improved error message for functions that require an absolute path.
           (Redmine #6877)
         - Fixed some spelling errors in examples.

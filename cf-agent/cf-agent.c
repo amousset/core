@@ -22,6 +22,8 @@
   included file COSL.txt.
 */
 
+
+#include <platform.h>
 #include <generic_agent.h>
 
 #include <actuator.h>
@@ -76,6 +78,7 @@
 #include <loading.h>
 #include <conn_cache.h>                 /* ConnCache_Init,ConnCache_Destroy */
 #include <net.h>
+#include <package_module.h>
 
 #include <mod_common.h>
 
@@ -135,7 +138,7 @@ static void FreeStringArray(int size, char **array);
 static void CheckAgentAccess(const Rlist *list, const Policy *policy);
 static void KeepControlPromises(EvalContext *ctx, const Policy *policy);
 static PromiseResult KeepAgentPromise(EvalContext *ctx, const Promise *pp, void *param);
-static int NewTypeContext(const Policy *policy, EvalContext *ctx, TypeSequence type);
+static int NewTypeContext(TypeSequence type);
 static void DeleteTypeContext(EvalContext *ctx, TypeSequence type);
 static PromiseResult ParallelFindAndVerifyFilesPromises(EvalContext *ctx, const Promise *pp);
 static bool VerifyBootstrap(void);
@@ -240,7 +243,9 @@ int main(int argc, char *argv[])
     }
     assert(policy);
 
+    GenericAgentPostLoadInit(ctx);
     ThisAgentInit();
+
     BeginAudit();
     KeepPromises(ctx, policy, config);
 
@@ -250,7 +255,11 @@ int main(int argc, char *argv[])
     }
 
     Nova_TrackExecution(config->input_file);
-    GenerateDiffReports(config, ctx);
+
+    /* Update packages cache. */
+    UpdatePackagesCache(ctx, false);
+
+    GenerateReports(config, ctx);
 
     PurgeLocks();
     BackupLockDatabase();
@@ -393,6 +402,10 @@ static GenericAgentConfig *CheckOpts(int argc, char **argv)
 
         case 'D':
             {
+                /* WAZA what if config->heap_soft is already defined???
+                 * e.g. we have two -D arguments? Then only the last are being
+                 * set, and we are leaking memory!
+                 * TODO fix this here, execd, serverd, promises! redmine#7191 */
                 StringSet *defined_classes = StringSetFromString(optarg, ',');
                 cfruncommand = StringSetContains(defined_classes, "cfruncommand");
                 config->heap_soft = defined_classes;
@@ -1144,11 +1157,11 @@ static void KeepPromiseBundles(EvalContext *ctx, const Policy *policy, GenericAg
         FatalError(ctx, "Errors in agent bundles");
     }
 
-        Writer *w = StringWriter();
-        WriterWrite(w, "Using bundlesequence => ");
-        RlistWrite(w, bundlesequence);
-        Log(LOG_LEVEL_VERBOSE, "%s", StringWriterData(w));
-        WriterClose(w);
+    Writer *w = StringWriter();
+    WriterWrite(w, "Using bundlesequence => ");
+    RlistWrite(w, bundlesequence);
+    Log(LOG_LEVEL_VERBOSE, "%s", StringWriterData(w));
+    WriterClose(w);
 
 /* If all is okay, go ahead and evaluate */
 
@@ -1256,7 +1269,7 @@ PromiseResult ScheduleAgentOperations(EvalContext *ctx, const Bundle *bp)
                 continue;
             }
 
-            if (!NewTypeContext(bp->parent_policy, ctx,type))
+            if (!NewTypeContext(type))
             {
                 continue;
             }
@@ -1591,7 +1604,7 @@ static void BannerStatus(PromiseResult status, char *type, char *name)
 /* Type context                                                      */
 /*********************************************************************/
 
-static int NewTypeContext(const Policy *policy, EvalContext *ctx, TypeSequence type)
+static int NewTypeContext(TypeSequence type)
 {
 // get maxconnections
 

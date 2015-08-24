@@ -22,6 +22,7 @@
   included file COSL.txt.
 */
 
+
 #include <generic_agent.h>
 
 #include <bootstrap.h>
@@ -107,9 +108,11 @@ ENTERPRISE_VOID_FUNC_2ARG_DEFINE_STUB(void, GenericAgentSetDefaultDigest, HashMe
 
 void MarkAsPolicyServer(EvalContext *ctx)
 {
-    EvalContextClassPutHard(ctx, "am_policy_hub", "source=bootstrap,deprecated,alias=policy_server");
+    EvalContextClassPutHard(ctx, "am_policy_hub",
+                            "source=bootstrap,deprecated,alias=policy_server");
     Log(LOG_LEVEL_VERBOSE, "Additional class defined: am_policy_hub");
-    EvalContextClassPutHard(ctx, "policy_server", "inventory,attribute_name=CFEngine roles,source=bootstrap");
+    EvalContextClassPutHard(ctx, "policy_server",
+                            "inventory,attribute_name=CFEngine roles,source=bootstrap");
     Log(LOG_LEVEL_VERBOSE, "Additional class defined: policy_server");
 }
 
@@ -129,81 +132,94 @@ void GenericAgentDiscoverContext(EvalContext *ctx, GenericAgentConfig *config)
 
     THIS_AGENT_TYPE = config->agent_type;
     LoggingSetAgentType(CF_AGENTTYPES[config->agent_type]);
-    EvalContextClassPutHard(ctx, CF_AGENTTYPES[config->agent_type], "cfe_internal,source=agent");
+    EvalContextClassPutHard(ctx, CF_AGENTTYPES[config->agent_type],
+                            "cfe_internal,source=agent");
 
     DetectEnvironment(ctx);
 
     EvalContextHeapPersistentLoadAll(ctx);
     LoadSystemConstants(ctx);
 
-    if (config->agent_type == AGENT_TYPE_AGENT && config->agent_specific.agent.bootstrap_policy_server)
+    const char *bootstrap_arg =
+        config->agent_specific.agent.bootstrap_policy_server;
+
+    /* Are we bootstrapping the agent? */
+    if (config->agent_type == AGENT_TYPE_AGENT && bootstrap_arg != NULL)
     {
+        EvalContextClassPutHard(ctx, "bootstrap_mode", "source=environment");
+
         if (!RemoveAllExistingPolicyInInputs(GetInputDir()))
         {
-            Log(LOG_LEVEL_ERR, "Error removing existing input files prior to bootstrap");
+            Log(LOG_LEVEL_ERR,
+                "Error removing existing input files prior to bootstrap");
             exit(EXIT_FAILURE);
         }
 
         if (!WriteBuiltinFailsafePolicy(GetInputDir()))
         {
-            Log(LOG_LEVEL_ERR, "Error writing builtin failsafe to inputs prior to bootstrap");
+            Log(LOG_LEVEL_ERR,
+                "Error writing builtin failsafe to inputs prior to bootstrap");
             exit(EXIT_FAILURE);
         }
 
-        bool am_policy_server = false;
+        char canonified_ipaddr[strlen(bootstrap_arg) + 1];
+        StringCanonify(canonified_ipaddr, bootstrap_arg);
+
+        bool am_policy_server =
+            EvalContextClassGet(ctx, NULL, canonified_ipaddr) != NULL;
+
+        if (am_policy_server)
         {
-            const char *canonified_bootstrap_policy_server = CanonifyName(config->agent_specific.agent.bootstrap_policy_server);
-            am_policy_server = NULL != EvalContextClassGet(ctx, NULL, canonified_bootstrap_policy_server);
+            Log(LOG_LEVEL_INFO, "Assuming role as policy server,"
+                " with policy distribution point at: %s", GetMasterDir());
+            MarkAsPolicyServer(ctx);
+
+            if (!MasterfileExists(GetMasterDir()))
             {
-                char policy_server_ipv4_class[CF_BUFSIZE];
-                snprintf(policy_server_ipv4_class, CF_MAXVARSIZE, "ipv4_%s", canonified_bootstrap_policy_server);
-                am_policy_server |= NULL != EvalContextClassGet(ctx, NULL, policy_server_ipv4_class);
+                Log(LOG_LEVEL_ERR, "In order to bootstrap as a policy server,"
+                    " the file '%s/promises.cf' must exist.", GetMasterDir());
+                exit(EXIT_FAILURE);
             }
 
-            if (am_policy_server)
-            {
-                Log(LOG_LEVEL_INFO, "Assuming role as policy server, with policy distribution point at %s", GetMasterDir());
-                MarkAsPolicyServer(ctx);
-
-                if (!MasterfileExists(GetMasterDir()))
-                {
-                    Log(LOG_LEVEL_ERR, "In order to bootstrap as a policy server, the file '%s/promises.cf' must exist.", GetMasterDir());
-                    exit(EXIT_FAILURE);
-                }
-            }
-            else
-            {
-                Log(LOG_LEVEL_INFO, "Not assuming role as policy server");
-            }
-
-            WriteAmPolicyHubFile(am_policy_server);
-        }
-
-        WritePolicyServerFile(GetWorkDir(), config->agent_specific.agent.bootstrap_policy_server);
-        SetPolicyServer(ctx, config->agent_specific.agent.bootstrap_policy_server);
-
-        if (am_policy_server) //It makes sense to check HA status only on policy hub.
-        {
             CheckAndSetHAState(GetWorkDir(), ctx);
         }
+        else
+        {
+            Log(LOG_LEVEL_INFO, "Assuming role as regular client,"
+                " bootstrapping to policy server: %s", bootstrap_arg);
+
+            if (config->agent_specific.agent.bootstrap_trust_server)
+            {
+                EvalContextClassPutHard(ctx, "trust_server", "source=agent");
+                Log(LOG_LEVEL_NOTICE,
+                    "Bootstrap mode: implicitly trusting server, "
+                    "use --trust-server=no if server trust is already established");
+            }
+        }
+
+        WriteAmPolicyHubFile(am_policy_server);
+
+        WritePolicyServerFile(GetWorkDir(), bootstrap_arg);
+        SetPolicyServer(ctx, bootstrap_arg);
 
         /* FIXME: Why it is called here? Can't we move both invocations to before if? */
         UpdateLastPolicyUpdateTime(ctx);
-        Log(LOG_LEVEL_INFO, "Bootstrapping to '%s'", POLICY_SERVER);
     }
     else
     {
         char *existing_policy_server = ReadPolicyServerFile(GetWorkDir());
         if (existing_policy_server)
         {
-            Log(LOG_LEVEL_VERBOSE, "This agent is bootstrapped to '%s'", existing_policy_server);
+            Log(LOG_LEVEL_VERBOSE, "This agent is bootstrapped to: %s",
+                existing_policy_server);
             SetPolicyServer(ctx, existing_policy_server);
             free(existing_policy_server);
             UpdateLastPolicyUpdateTime(ctx);
         }
         else
         {
-            Log(LOG_LEVEL_VERBOSE, "This agent is not bootstrapped - can't find policy_server.dat in %s", GetWorkDir());
+            Log(LOG_LEVEL_VERBOSE, "This agent is not bootstrapped -"
+                " can't find policy_server.dat in: %s", GetWorkDir());
             return;
         }
 
@@ -348,7 +364,8 @@ static bool WritePolicyValidatedFile(ARG_UNUSED const GenericAgentConfig *config
 {
     if (!MakeParentDirectory(filename, true))
     {
-        Log(LOG_LEVEL_ERR, "While writing policy validated marker file '%s', could not create directory (MakeParentDirectory: %s)", filename, GetErrorStr());
+        Log(LOG_LEVEL_ERR,
+            "Could not write policy validated marker file: %s", filename);
         return false;
     }
 
@@ -693,6 +710,10 @@ void GenericAgentInitialize(EvalContext *ctx, GenericAgentConfig *config)
              statedir, FILE_SEPARATOR, FILE_SEPARATOR);
     MakeParentDirectory(ebuff, force);
 
+    snprintf(ebuff, sizeof(ebuff), "%s%cpromise_log%c",
+            statedir, FILE_SEPARATOR, FILE_SEPARATOR);
+    MakeParentDirectory(ebuff, force);
+
     OpenNetwork();
     CryptoInitialize();
 
@@ -706,11 +727,6 @@ void GenericAgentInitialize(EvalContext *ctx, GenericAgentConfig *config)
         char *bootstrapped_policy_server = ReadPolicyServerFile(workdir);
         PolicyHubUpdateKeys(bootstrapped_policy_server);
         free(bootstrapped_policy_server);
-        const char *tls_ciphers =
-            EvalContextVariableControlCommonGet(ctx, COMMON_CONTROL_TLS_CIPHERS);
-        const char *tls_min_version =
-            EvalContextVariableControlCommonGet(ctx, COMMON_CONTROL_TLS_MIN_VERSION);
-        cfnet_init(tls_min_version, tls_ciphers);
     }
 
     size_t cwd_size = PATH_MAX;
@@ -724,9 +740,15 @@ void GenericAgentInitialize(EvalContext *ctx, GenericAgentConfig *config)
                 cwd_size *= 2;
                 continue;
             }
-            Log(LOG_LEVEL_WARNING, "Could not determine current directory. (getcwd: '%s')", GetErrorStr());
-            break;
+            else
+            {
+                Log(LOG_LEVEL_WARNING,
+                    "Could not determine current directory (getcwd: %s)",
+                    GetErrorStr());
+                break;
+            }
         }
+
         EvalContextSetLaunchDirectory(ctx, cwd);
         break;
     }
@@ -790,21 +812,46 @@ static bool GeneratePolicyReleaseIDFromGit(char *release_id_out,
     snprintf(git_filename, PATH_MAX, "%s/.git/HEAD", policy_dir);
     MapName(git_filename);
 
+    // Note: Probably we should not be reading all of these filenames directly,
+    // and should instead use git plumbing commands to retrieve the data.
     FILE *git_file = fopen(git_filename, "r");
     if (git_file)
     {
         char git_head[128];
         int scanned = fscanf(git_file, "ref: %127s", git_head);
-        fclose(git_file);
 
         if (scanned == 1)
+        // Found HEAD Reference which means we are on a checked out branch
         {
-            snprintf(git_filename, PATH_MAX, "%s/.git/%s", policy_dir, git_head);
+            fclose(git_file);
+            snprintf(git_filename, PATH_MAX, "%s/.git/%s",
+                     policy_dir, git_head);
             git_file = fopen(git_filename, "r");
+            Log(LOG_LEVEL_DEBUG, "Found a git HEAD ref");
         }
         else
         {
-            git_file = NULL;
+            Log(LOG_LEVEL_DEBUG,
+                "Unable to find HEAD ref in '%s', looking for commit instead",
+                git_filename);
+            assert(out_size > 40);
+            fseek(git_file, 0, SEEK_SET);
+            scanned = fscanf(git_file, "%40s", release_id_out);
+            fclose(git_file);
+
+            if (scanned == 1)
+            {
+                Log(LOG_LEVEL_DEBUG,
+                    "Found current git checkout pointing to: %s",
+                    release_id_out);
+                return true;
+            }
+            else
+            {
+                /* We didn't find a commit sha in .git/HEAD, so we assume the
+                 * git information is invalid. */
+                git_file = NULL;
+            }
         }
         if (git_file)
         {
@@ -871,7 +918,9 @@ static bool GeneratePolicyReleaseID(char *release_id_out, size_t out_size,
  */
 static void GetPromisesValidatedFile(char *filename, size_t max_size, const GenericAgentConfig *config, const char *maybe_dirname)
 {
-    char dirname[PATH_MAX + 1];
+    char dirname[max_size];
+
+    /* TODO overflow error checking! */
     GetAutotagDir(dirname, max_size, maybe_dirname);
 
     if (NULL == maybe_dirname && MINUSF)
@@ -897,7 +946,7 @@ static void GetAutotagDir(char *dirname, size_t max_size, const char *maybe_dirn
     }
     else if (MINUSF)
     {
-        snprintf(dirname, max_size, "%s%c", GetStateDir(), FILE_SEPARATOR);
+        strlcpy(dirname, GetStateDir(), max_size);
     }
     else
     {
@@ -1562,17 +1611,6 @@ void GenericAgentConfigApply(EvalContext *ctx, const GenericAgentConfig *config)
         break;
     }
 
-    if (config->agent_specific.agent.bootstrap_policy_server)
-    {
-        EvalContextClassPutHard(ctx, "bootstrap_mode", "source=environment");
-        if (config->agent_specific.agent.bootstrap_trust_server)
-        {
-            EvalContextClassPutHard(ctx, "trust_server", "source=agent");
-            Log(LOG_LEVEL_NOTICE, "Bootstrap mode: implicitly trusting server, "
-                "use --trust-server=no if server trust is already established");
-        }
-    }
-
     if (config->color)
     {
         LoggingSetColor(config->color);
@@ -1627,4 +1665,14 @@ void GenericAgentConfigSetBundleSequence(GenericAgentConfig *config, const Rlist
 {
     RlistDestroy(config->bundlesequence);
     config->bundlesequence = RlistCopy(bundlesequence);
+}
+
+bool GenericAgentPostLoadInit(const EvalContext *ctx)
+{
+    const char *tls_ciphers =
+        EvalContextVariableControlCommonGet(ctx, COMMON_CONTROL_TLS_CIPHERS);
+    const char *tls_min_version =
+        EvalContextVariableControlCommonGet(ctx, COMMON_CONTROL_TLS_MIN_VERSION);
+
+    return cfnet_init(tls_min_version, tls_ciphers);
 }

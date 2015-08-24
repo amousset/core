@@ -96,7 +96,89 @@ struct EvalContext_
 
     // Full path to directory that the binary was launched from.
     char *launch_directory;
+    
+    /* new package promise evaluation context */
+    PackagePromiseContext *package_promise_context;
 };
+
+
+void AddDefaultPackageModuleToContext(const EvalContext *ctx, char *name)
+{
+    assert(ctx);
+    assert(ctx->package_promise_context);
+    
+    free(ctx->package_promise_context->control_package_module);
+    ctx->package_promise_context->control_package_module =
+            SafeStringDuplicate(name);
+}
+
+void AddDefaultInventoryToContext(const EvalContext *ctx, Rlist *inventory)
+{
+    assert(ctx);
+    assert(ctx->package_promise_context);
+    
+    RlistDestroy(ctx->package_promise_context->control_package_inventory);
+    ctx->package_promise_context->control_package_inventory =
+            RlistCopy(inventory);
+}
+
+static
+int PackageManagerSeqCompare(const void *a, const void *b, ARG_UNUSED void *data)
+{
+    return StringSafeCompare((char*)a, ((PackageModuleBody*)b)->name);
+}
+
+void AddPackageModuleToContext(const EvalContext *ctx, PackageModuleBody *pm)
+{
+    /* First check if the body is there added from previous pre-evaluation 
+     * iteration. If it is there update it as we can have new expanded variables. */
+    ssize_t pm_seq_index;
+    if ((pm_seq_index = SeqIndexOf(ctx->package_promise_context->package_modules_bodies, 
+            pm->name, PackageManagerSeqCompare)) != -1)
+    {
+        SeqRemove(ctx->package_promise_context->package_modules_bodies, pm_seq_index);
+    }
+    SeqAppend(ctx->package_promise_context->package_modules_bodies, pm);
+}
+
+PackageModuleBody *GetPackageModuleFromContext(const EvalContext *ctx,
+        const char *name)
+{
+    if (name == NULL || StringSafeEqual("cf_null", name))
+    {
+        return NULL;
+    }
+    
+    for (int i = 0;
+         i < SeqLength(ctx->package_promise_context->package_modules_bodies);
+         i++)
+    {
+        PackageModuleBody *pm =
+                SeqAt(ctx->package_promise_context->package_modules_bodies, i);
+        if (strcmp(name, pm->name) == 0)
+        {
+            return pm;
+        }
+    }
+    return NULL;
+}
+
+PackageModuleBody *GetDefaultPackageModuleFromContext(const EvalContext *ctx)
+{
+    char *def_pm_name = ctx->package_promise_context->control_package_module;
+    return GetPackageModuleFromContext(ctx, def_pm_name);
+}
+
+Rlist *GetDefaultInventoryFromContext(const EvalContext *ctx)
+{
+    return ctx->package_promise_context->control_package_inventory;
+}
+
+PackagePromiseContext *GetPackagePromiseContext(const EvalContext *ctx)
+{
+    return ctx->package_promise_context;
+}
+
 
 static StackFrame *LastStackFrame(const EvalContext *ctx, size_t offset)
 {
@@ -729,6 +811,35 @@ static void StackFrameDestroy(StackFrame *frame)
     }
 }
 
+static
+void FreePackageManager(PackageModuleBody *manager)
+{
+    free(manager->name);
+    RlistDestroy(manager->options);
+    free(manager);
+}
+
+static
+PackagePromiseContext *PackagePromiseConfigNew()
+{
+    PackagePromiseContext *package_promise_defaults = 
+            xmalloc(sizeof(PackagePromiseContext));
+    package_promise_defaults->control_package_module = NULL;
+    package_promise_defaults->control_package_inventory = NULL;
+    package_promise_defaults->package_modules_bodies =
+            SeqNew(5, FreePackageManager);
+    
+    return package_promise_defaults;
+}
+
+static
+void FreePackagePromiseContext(PackagePromiseContext *pp_ctx)
+{
+    SeqDestroy(pp_ctx->package_modules_bodies);
+    RlistDestroy(pp_ctx->control_package_inventory);
+    free(pp_ctx);
+}
+
 EvalContext *EvalContextNew(void)
 {
     EvalContext *ctx = xcalloc(1, sizeof(EvalContext));
@@ -762,6 +873,8 @@ EvalContext *EvalContextNew(void)
 
         LoggingPrivSetContext(pctx);
     }
+                                    
+    ctx->package_promise_context = PackagePromiseConfigNew();
 
     return ctx;
 }
@@ -805,6 +918,8 @@ void EvalContextDestroy(EvalContext *ctx)
             RBTreeIteratorDestroy(it);
             RBTreeDestroy(ctx->function_cache);
         }
+        
+        FreePackagePromiseContext(ctx->package_promise_context);
 
         free(ctx);
     }
@@ -1464,23 +1579,7 @@ char *EvalContextStackPath(const EvalContext *ctx)
         case STACK_FRAME_TYPE_PROMISE_ITERATION:
             BufferAppendChar(path, '/');
             BufferAppendChar(path, '\'');
-            for (const char *ch = frame->data.promise_iteration.owner->promiser; *ch != '\0'; ch++)
-            {
-                switch (*ch)
-                {
-                case '*':
-                    BufferAppendChar(path, ':');
-                    break;
-
-                case '#':
-                    BufferAppendChar(path, '.');
-                    break;
-
-                default:
-                    BufferAppendChar(path, *ch);
-                    break;
-                }
-            }
+            BufferAppendAbbreviatedStr(path, frame->data.promise_iteration.owner->promiser, CF_MAXFRAGMENT);
             BufferAppendChar(path, '\'');
             if (i == SeqLength(ctx->stack) - 1)
             {
@@ -1988,6 +2087,11 @@ void EvalContextPromiseLockCachePut(EvalContext *ctx, const char *key)
     StringSetAdd(ctx->promise_lock_cache, xstrdup(key));
 }
 
+void EvalContextPromiseLockCacheRemove(EvalContext *ctx, const char *key)
+{
+    StringSetRemove(ctx->promise_lock_cache, key);
+}
+
 bool EvalContextFunctionCacheGet(const EvalContext *ctx, const FnCall *fp, const Rlist *args, Rval *rval_out)
 {
     if (!(ctx->eval_options & EVAL_OPTION_CACHE_SYSTEM_FUNCTIONS))
@@ -2200,40 +2304,6 @@ static void SetPromiseOutcomeClasses(EvalContext *ctx, PromiseResult status, Def
     DeleteAllClasses(ctx, del_classes);
 }
 
-static void UpdatePromiseComplianceStatus(PromiseResult status, const Promise *pp, const char *reason)
-{
-    if (!IsPromiseValuableForLogging(pp))
-    {
-        return;
-    }
-
-    char compliance_status;
-
-    switch (status)
-    {
-    case PROMISE_RESULT_CHANGE:
-        compliance_status = PROMISE_STATE_REPAIRED;
-        break;
-
-    case PROMISE_RESULT_WARN:
-    case PROMISE_RESULT_TIMEOUT:
-    case PROMISE_RESULT_FAIL:
-    case PROMISE_RESULT_DENIED:
-    case PROMISE_RESULT_INTERRUPTED:
-        compliance_status = PROMISE_STATE_NOTKEPT;
-        break;
-
-    case PROMISE_RESULT_NOOP:
-        compliance_status = PROMISE_STATE_ANY;
-        break;
-
-    default:
-        ProgrammingError("Unknown status '%c' has been passed to UpdatePromiseComplianceStatus", status);
-    }
-
-    NotePromiseCompliance(pp, compliance_status, reason);
-}
-
 static void SummarizeTransaction(EvalContext *ctx, TransactionContext tc, const char *logname)
 {
     if (logname && (tc.log_string))
@@ -2437,7 +2507,6 @@ void cfPS(EvalContext *ctx, LogLevel level, PromiseResult status, const Promise 
     /* Now complete the exits status classes and auditing */
 
     ClassAuditLog(ctx, pp, attr, status);
-    UpdatePromiseComplianceStatus(status, pp, msg);
     free(msg);
 }
 

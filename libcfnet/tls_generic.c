@@ -638,13 +638,15 @@ int TLSSend(SSL *ssl, const char *buffer, int length)
     {
         if ((SSL_get_shutdown(ssl) & SSL_RECEIVED_SHUTDOWN) != 0)
         {
-            Log(LOG_LEVEL_VERBOSE, "Remote peer terminated TLS session");
+            Log(LOG_LEVEL_VERBOSE,
+                "Remote peer terminated TLS session (SSL_write)");
             return 0;
         }
         else
         {
             TLSLogError(ssl, LOG_LEVEL_ERR,
-                        "Connection unexpectedly closed. SSL_write", sent);
+                        "Connection unexpectedly closed (SSL_write)",
+                        sent);
             return 0;
         }
     }
@@ -661,8 +663,8 @@ int TLSSend(SSL *ssl, const char *buffer, int length)
  * @brief Receives at most #length bytes of data from the SSL session
  *        and stores it in the buffer.
  * @param ssl SSL information.
- * @param buffer Buffer, of size at least CF_BUFSIZE, to store received data.
- * @param length Length of the data to receive, must be < CF_BUFSIZE.
+ * @param buffer Buffer, of size at least #toget + 1 to store received data.
+ * @param toget Length of the data to receive, must be < CF_BUFSIZE.
  * @return The length of the received data, which could be smaller or equal
  *         than the requested or -1 in case of error or 0 if connection was
  *         closed.
@@ -670,15 +672,15 @@ int TLSSend(SSL *ssl, const char *buffer, int length)
  *       SSL_CTX_set_mode(SSL_MODE_AUTO_RETRY) to make sure that either
  *       operation completed or an error occurred.
  */
-int TLSRecv(SSL *ssl, char *buffer, int length)
+int TLSRecv(SSL *ssl, char *buffer, int toget)
 {
-    assert(length > 0);
-    assert(length < CF_BUFSIZE);
+    assert(toget > 0);
+    assert(toget < CF_BUFSIZE);
     assert_SSLIsBlocking(ssl);
 
     /* TODO what is the return value of SSL_read in case of socket timeout? */
 
-    int received = SSL_read(ssl, buffer, length);
+    int received = SSL_read(ssl, buffer, toget);
     if (received < 0)
     {
         TLSLogError(ssl, LOG_LEVEL_ERR, "SSL_read", received);
@@ -688,12 +690,14 @@ int TLSRecv(SSL *ssl, char *buffer, int length)
     {
         if ((SSL_get_shutdown(ssl) & SSL_RECEIVED_SHUTDOWN) != 0)
         {
-            Log(LOG_LEVEL_VERBOSE, "Remote peer terminated TLS session");
+            Log(LOG_LEVEL_VERBOSE,
+                "Remote peer terminated TLS session (SSL_read)");
         }
         else
         {
             TLSLogError(ssl, LOG_LEVEL_ERR,
-                        "Connection unexpectedly closed. SSL_read", received);
+                        "Connection unexpectedly closed (SSL_read)",
+                        received);
         }
     }
 
@@ -806,7 +810,8 @@ void TLSSetDefaultOptions(SSL_CTX *ssl_ctx, const char *min_version)
         || strcmp(min_version, "1.0") == 0)
     {
         /* Do nothing, that's our default setting */
-        Log(LOG_LEVEL_DEBUG, "Minimum acceptable TLS version: 1.0");
+        Log(LOG_LEVEL_VERBOSE,
+            "Setting minimum acceptable TLS version: 1.0");
     }
     else if (strcmp(min_version, "1.1") == 0)
     {
@@ -817,7 +822,8 @@ void TLSSetDefaultOptions(SSL_CTX *ssl_ctx, const char *min_version)
                 min_version, compiletime_min_version);
         }
         options |= SSL_OP_NO_TLSv1;
-        Log(LOG_LEVEL_DEBUG, "Minimum acceptable TLS version: 1.1");
+        Log(LOG_LEVEL_VERBOSE,
+            "Setting minimum acceptable TLS version: 1.1");
 
     }
     else if (strcmp(min_version, "1.2") == 0)
@@ -830,7 +836,8 @@ void TLSSetDefaultOptions(SSL_CTX *ssl_ctx, const char *min_version)
                 min_version, compiletime_min_version);
         }
         options |= SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1;
-        Log(LOG_LEVEL_DEBUG, "Minimum acceptable TLS version: 1.2");
+        Log(LOG_LEVEL_VERBOSE,
+            "Setting minimum acceptable TLS version: 1.2");
     }
     else
     {

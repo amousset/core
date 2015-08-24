@@ -947,6 +947,13 @@ static void BuiltinClasses(EvalContext *ctx)
     snprintf(vbuff, CF_BUFSIZE, "cfengine_%s", CanonifyName(Version()));
     CreateHardClassesFromCanonification(ctx, vbuff, "inventory,attribute_name=none,source=agent");
 
+#ifdef HAVE_LIBXML2
+    CreateHardClassesFromCanonification(ctx, "feature_xml", "source=agent");
+#endif
+
+#ifdef HAVE_LIBYAML
+    CreateHardClassesFromCanonification(ctx, "feature_yaml", "source=agent");
+#endif
 }
 
 /*******************************************************************/
@@ -982,17 +989,26 @@ static void OSClasses(EvalContext *ctx)
 /* First we check if init process is systemd, and set "systemd" hard class. */
 
     {
-        char init_cmdline[CF_BUFSIZE];
-        if (ReadLine("/proc/1/cmdline", init_cmdline, sizeof(init_cmdline)))
+        char init_path[CF_BUFSIZE];
+        if (ReadLine("/proc/1/cmdline", init_path, sizeof(init_path)))
         {
+            /* Follow possible symlinks. */
+
+            char resolved_path[PATH_MAX];      /* realpath() needs PATH_MAX */
+            if (realpath(init_path, resolved_path) != NULL &&
+                strlen(resolved_path) < sizeof(init_path))
+            {
+                strcpy(init_path, resolved_path);
+            }
+
+            /* Check if string ends with "/systemd". */
             char *p;
             char *next_p = NULL;
             const char *term = "/systemd";
-            // Find last component.
             do
             {
                 p = next_p;
-                next_p = strstr(next_p ? next_p+strlen(term) : init_cmdline, term);
+                next_p = strstr(next_p ? next_p+strlen(term) : init_path, term);
             }
             while (next_p);
 
@@ -2110,7 +2126,7 @@ static int Linux_Debian_Version(EvalContext *ctx)
         snprintf(classname, CF_MAXVARSIZE, "debian_%u", major);
         SetFlavour(ctx, classname);
         break;
-        /* Fall-through */
+
     case 1:
         Log(LOG_LEVEL_VERBOSE, "This appears to be a Debian %u system.", major);
         snprintf(classname, CF_MAXVARSIZE, "debian_%u", major);

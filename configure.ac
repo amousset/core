@@ -44,7 +44,7 @@ AC_CHECK_PROG(MAKEINFO, makeinfo, makeinfo)
 define([revision], m4_esyscmd_s([git rev-list -1 --abbrev-commit HEAD]))
 
 _AM_SET_OPTION([tar-ustar])
-AM_INIT_AUTOMAKE(cfengine, 3.7.0a1.revision)
+AM_INIT_AUTOMAKE(cfengine, 3.8.0a1.revision)
 AM_MAINTAINER_MODE([enable])
 
 AC_DEFINE(BUILD_YEAR, esyscmd([date +%Y | tr -d '\n']), "Software build year")
@@ -596,6 +596,8 @@ AC_CHECK_HEADERS(sys/jail.h, [], [], [AC_INCLUDES_DEFAULT
 # include <sys/param.h>
 #endif
 ])
+AC_CHECK_HEADERS(net/route.h netinet/in.h netinet/ip.h)
+
 
 AC_HEADER_STDC
 AC_HEADER_TIME
@@ -728,6 +730,10 @@ AC_REPLACE_FUNCS(gmtime_r)
 AC_CHECK_DECLS(getline, [], [], [#define _GNU_SOURCE 1
 AC_INCLUDES_DEFAULT])
 AC_REPLACE_FUNCS(getline)
+
+AC_CHECK_DECLS(strchrnul, [], [], [#define _GNU_SOURCE 1
+AC_INCLUDES_DEFAULT])
+AC_REPLACE_FUNCS(strchrnul)
 
 AC_CHECK_DECLS(localtime_r, [], [], [[#include <time.h>]])
 AC_REPLACE_FUNCS(localtime_r)
@@ -1346,10 +1352,38 @@ AC_ARG_WITH(systemd-service, AS_HELP_STRING([--with-systemd-service=PATH],
             SYSTEMD_SERVICE_PATH="$withval"
         fi
         AC_SUBST([SYSTEMD_SERVICE_PATH])
+        AC_CONFIG_FILES([misc/systemd/cfengine3.service])
         AC_CONFIG_FILES([misc/systemd/cfengine3-web.service])
     fi
 ])
 AM_CONDITIONAL([WITH_SYSTEMD_SERVICE], [test -n "$SYSTEMD_SERVICE_PATH"])
+
+AC_ARG_WITH(environment-path, AS_HELP_STRING([--with-environment-path=PATH],
+    [Specifies the location of the environment files for the platform. Currently used only by systemd.]))
+OS_ENVIRONMENT_PATH=
+if test -z "$with_environment_path" || test "$with_environment_path" = "yes"; then
+    if test -n "$SYSTEMD_SERVICE_PATH"; then
+        for i in /etc/sysconfig /etc/default; do
+            if test -d $i; then
+                OS_ENVIRONMENT_PATH=$i
+                break
+            fi
+        done
+        if test -z "$OS_ENVIRONMENT_PATH"; then
+            AC_MSG_ERROR([Unable to detect location of environment files on the platform (e.g. '/etc/sysconfig'). Please specify it using --with-environment-path, or turn off systemd support.])
+        fi
+    fi
+else
+    if test "$with_environment_path" = "no"; then
+        if test -n "$SYSTEMD_SERVICE_PATH"; then
+            AC_MSG_ERROR([It is not possible to both specify systemd support and not provide an environment path with --without-environment-path.])
+        fi
+    else
+        OS_ENVIRONMENT_PATH="$with_environment_path"
+    fi
+fi
+AC_SUBST([OS_ENVIRONMENT_PATH])
+
 
 dnl #####################################################################
 dnl Hostname and Version stuff
@@ -1422,6 +1456,21 @@ fi
 #
 AC_SUBST(post_macros)
 AM_SUBST_NOTMAKE(post_macros)
+
+dnl ######################################################################
+dnl Check how file descriptor transfers are supported between proceses.
+dnl ######################################################################
+AC_CHECK_MEMBER([struct msghdr.msg_control],
+                [AC_DEFINE([HAVE_MSGHDR_MSG_CONTROL], [1], [Define to 1 if SCM_RIGHTS supported])],
+                [AC_DEFINE([HAVE_NO_MSGHDR_MSG_CONTROL], [1], [Define to 1 if SCM_RIGHTS support])],
+                [[#include <sys/types.h>
+                  #include <sys/socket.h>]])
+
+AC_CHECK_MEMBER([struct msghdr.msg_accrights],
+                [AC_DEFINE([HAVE_MSGHDR_ACCRIGHTS], [1], [Define to 1 if BSD .msg_accrights supported])],
+                [AC_DEFINE([HAVE_NO_MSGHDR_ACCRIGHTS], [1], [Define to 1 if no BSD .msg_accrights support])],
+                [[#include <sys/types.h>
+                  #include <sys/socket.h>]])
 
 dnl ######################################################################
 dnl Summarize
@@ -1512,6 +1561,10 @@ else
   AC_MSG_RESULT([-> Systemd service: disabled])
 fi
 
+if test -n "$OS_ENVIRONMENT_PATH"; then
+  AC_MSG_RESULT([-> Path of platform environment files: $OS_ENVIRONMENT_PATH])
+fi
+
 m4_indir(incstart[]incend, [nova/config.m4])
 
 AC_MSG_RESULT([-> Workdir: $WORKDIR])
@@ -1522,8 +1575,6 @@ AC_MSG_RESULT([-> Piddir: $PIDDIR])
 AC_MSG_RESULT([-> Statedir: $STATEDIR])
 
 AC_MSG_RESULT( )
-
-
 
 dnl ######################################################################
 dnl Now make the Makefiles

@@ -83,13 +83,13 @@ body templates and translate the parameters. This requires one round
 of expansion with scopeid "body". Then we use this fully assembled promise
 and expand vars and function calls.
 
-To expand the variables in a promise we need to 
+To expand the variables in a promise we need to
 
    -- first get all strings, also parameterized bodies, which
       could also be lists
                                                                      /
-        //  MapIteratorsFromRval("scope",&lol,"ksajd$(one)$(two)...$(three)"); \/ 
-        
+        //  MapIteratorsFromRval("scope",&lol,"ksajd$(one)$(two)...$(three)"); \/
+
    -- compile an ordered list of variables involved , with types -           /
       assume all are lists - these are never inside sub-bodies by design,  \/
       so all expansion data are in the promise itself
@@ -105,14 +105,14 @@ To expand the variables in a promise we need to
 
    -- we've already checked types of lhs rhs, must match so an iterator
       can only be in a non-naked variable?
-   
+
    -- form the outer loops to generate combinations
 
 Note, we map the current context into a fluid context "this" that maps
 every list into a scalar during iteration. Thus "this" never contains
 lists. This presents a problem for absolute references like $(abs.var),
 since these cannot be mapped into "this" without some magic.
-   
+
 **********************************************************************/
 
 PromiseResult ExpandPromise(EvalContext *ctx, const Promise *pp,
@@ -200,17 +200,17 @@ static PromiseResult ExpandPromiseAndDo(EvalContext *ctx, const Promise *pp,
             }
 
             PromiseResult iteration_result = ActOnPromise(ctx, pexp, param);
-            
-            // Redmine#6484 
-            // Only during pre-evaluation ActOnPromise is set to be a pointer to 
-            // CommonEvalPromise. While doing CommonEvalPromise check all the 
-            // handles should be not collected and dependant promises should not
+
+            // Redmine#6484
+            // Only during pre-evaluation ActOnPromise is set to be a pointer to
+            // CommonEvalPromise. While doing CommonEvalPromise check all the
+            // handles should be not collected and dependent promises should not
             // be notified.
             if (ActOnPromise != &CommonEvalPromise)
             {
                 NotifyDependantPromises(ctx, pexp, iteration_result);
             }
-            
+
             result = PromiseResultUpdate(result, iteration_result);
 
             if (strcmp(pp->parent_promise_type->name, "vars") == 0 || strcmp(pp->parent_promise_type->name, "meta") == 0)
@@ -713,7 +713,7 @@ bool ExpandScalar(const EvalContext *ctx,
 
             default:
                 // Discover if we are about to evaluate a promise with a cf_null-list
-                if ((value && strcmp(RlistScalarValue(value), CF_NULL_VALUE) == 0) 
+                if ((value && strcmp(RlistScalarValue(value), CF_NULL_VALUE) == 0)
                 // or a list from a foreign bundle that can't be expanded because it is a null list there
                    || (type == CF_DATA_TYPE_NONE && !value && strchr(BufferData(current_item), CF_MAPPEDLIST)))
                 {
@@ -1037,7 +1037,9 @@ static void ResolveControlBody(EvalContext *ctx, GenericAgentConfig *config,
             Log(LOG_LEVEL_ERR,
                 "Attribute '%s' in %s:%zu is of wrong type, skipping",
                 lval, filename, lineno);
-            goto cont;
+            VarRefDestroy(ref);
+            RvalDestroy(evaluated_rval);
+            continue;
         }
 
         bool success = EvalContextVariablePut(
@@ -1048,7 +1050,9 @@ static void ResolveControlBody(EvalContext *ctx, GenericAgentConfig *config,
             Log(LOG_LEVEL_ERR,
                 "Attribute '%s' in %s:%zu can't be added, skipping",
                 lval, filename, lineno);
-            goto cont;
+            VarRefDestroy(ref);
+            RvalDestroy(evaluated_rval);
+            continue;
         }
 
         VarRefDestroy(ref);
@@ -1111,18 +1115,76 @@ static void ResolveControlBody(EvalContext *ctx, GenericAgentConfig *config,
                 PROTOCOL_VERSION_STRING[config->protocol_version]);
         }
 
+        /* Those are package_inventory and package_module common control body options */
+        if (strcmp(lval, CFG_CONTROLBODY[COMMON_CONTROL_PACKAGE_INVENTORY].lval) == 0)
+        {
+            AddDefaultInventoryToContext(ctx, RvalRlistValue(evaluated_rval));
+            Log(LOG_LEVEL_VERBOSE, "SET common package_inventory list");
+        }
+        if (strcmp(lval, CFG_CONTROLBODY[COMMON_CONTROL_PACKAGE_MODULE].lval) == 0)
+        {
+            AddDefaultPackageModuleToContext(ctx, RvalScalarValue(evaluated_rval));
+            Log(LOG_LEVEL_VERBOSE, "SET common package_module: %s",
+                RvalScalarValue(evaluated_rval));
+        }
+
         if (strcmp(lval, CFG_CONTROLBODY[COMMON_CONTROL_GOALPATTERNS].lval) == 0)
         {
             /* Ignored */
-            goto cont;
         }
 
-      cont:
         RvalDestroy(evaluated_rval);
     }
 
     EvalContextStackPopFrame(ctx);
     free(scope);
+}
+
+static void ResolvePackageManagerBody(EvalContext *ctx, const Body *pm_body)
+{
+    PackageModuleBody *new_manager = xcalloc(1, sizeof(PackageModuleBody));
+    new_manager->name = SafeStringDuplicate(pm_body->name);
+
+    for (size_t i = 0; i < SeqLength(pm_body->conlist); i++)
+    {
+        Constraint *cp = SeqAt(pm_body->conlist, i);
+
+        Rval returnval = {0};
+
+        if (IsDefinedClass(ctx, cp->classes))
+        {
+            returnval = ExpandPrivateRval(ctx, NULL, "body",
+                                          cp->rval.item, cp->rval.type);
+        }
+
+        if (returnval.item == NULL || returnval.type == RVAL_TYPE_NOPROMISEE)
+        {
+            Log(LOG_LEVEL_VERBOSE, "have invalid constraint while resolving"
+                    "package promise body: %s", cp->lval);
+            continue;
+        }
+
+        if (strcmp(cp->lval, "query_installed_ifelapsed") == 0)
+        {
+            new_manager->installed_ifelapsed =
+                    (int)IntFromString(RvalScalarValue(returnval));
+        }
+        else if (strcmp(cp->lval, "query_updates_ifelapsed") == 0)
+        {
+            new_manager->updates_ifelapsed =
+                    (int)IntFromString(RvalScalarValue(returnval));
+        }
+        else if (strcmp(cp->lval, "default_options") == 0)
+        {
+            new_manager->options = RlistCopy(RvalRlistValue(returnval));
+        }
+        else
+        {
+            /* This should be handled by the parser. */
+            assert(0);
+        }
+    }
+    AddPackageModuleToContext(ctx, new_manager);
 }
 
 void PolicyResolve(EvalContext *ctx, const Policy *policy,
@@ -1157,6 +1219,12 @@ void PolicyResolve(EvalContext *ctx, const Policy *policy,
         if (strcmp(bdp->name, "control") == 0)
         {
             ResolveControlBody(ctx, config, bdp);
+        }
+        /* Collect all package managers data from policy as we don't know yet
+         * which ones we will use. */
+        else if (strcmp(bdp->type, "package_module") == 0)
+        {
+            ResolvePackageManagerBody(ctx, bdp);
         }
     }
 }

@@ -179,6 +179,11 @@ PackageAction PackageActionFromString(const char *s)
     return FindTypeInArray(PACKAGE_ACTION_TYPES, s, PACKAGE_ACTION_NONE, PACKAGE_ACTION_NONE);
 }
 
+NewPackageAction GetNewPackagePolicy(const char *s, const char **action_types)
+{
+    return FindTypeInArray(action_types, s, NEW_PACKAGE_ACTION_NONE, NEW_PACKAGE_ACTION_NONE);
+}
+
 PackageVersionComparator PackageVersionComparatorFromString(const char *s)
 {
     static const char *const PACKAGE_SELECT_TYPES[] =
@@ -813,7 +818,7 @@ size_t CommandArg0_bound(char *dst, const char *src, size_t dst_size)
         end_delimiter = ' ';
     }
 
-    char *end = strchr(start, end_delimiter);
+    char *end = strchrnul(start, end_delimiter);
     size_t len = end - start;
     if (len < dst_size)
     {
@@ -823,9 +828,10 @@ size_t CommandArg0_bound(char *dst, const char *src, size_t dst_size)
     }
     else
     {
-        /* Check return value! If -1, the user should never use dst. */
-        strlcpy(dst, "BUG: COMMANDARG0_TOO_LONG",
-                MIN(dst_size - 1, strlen("BUG: COMMANDARG0_TOO_LONG")));
+        /* Check return value of CommandArg0_bound! If -1, the user should
+         * never use dst, but just in case we are writing a bogus string. */
+        const char trap[] = "BUG: COMMANDARG0_TOO_LONG";
+        strlcpy(dst, trap, dst_size);
         return (size_t) -1;
     }
 }

@@ -223,6 +223,12 @@ char *SearchAndReplace(const char *source, const char *search, const char *repla
 
 /*********************************************************************/
 
+/**
+   @TODO create a new one for already allocated arrays:
+       bool StringConcat(dest, dest_size, ...)
+   where the end of the va_args list is signified by a NULL sentinel element.
+ */
+
 char *StringConcatenate(size_t count, const char *first, ...)
 {
     if (count < 1)
@@ -789,7 +795,10 @@ int StripTrailingNewline(char *str, size_t max_length)
     return 0;
 }
 
-/* Off-by-one quirk in max_length.
+/**
+ * Removes trailing whitespace from a string.
+ *
+ * @WARNING Off-by-one quirk in max_length.
  *
  * Both StripTrailngNewline() and Chop() have long allowed callers to
  * pass (effectively) the strlen(str) rather than the size of memory
@@ -798,7 +807,8 @@ int StripTrailingNewline(char *str, size_t max_length)
  * the buffer.  It may be sensible to review all callers and change so
  * that max_length is the buffer size instead.
  *
- * TODO: assess practicality of that change in behaviour.
+ * TODO change Chop() to accept str_len parameter. It goes without saying that
+ * the callers should call it as:    Chop(s, strlen(s));
  */
 
 int Chop(char *str, size_t max_length)
@@ -808,6 +818,8 @@ int Chop(char *str, size_t max_length)
         size_t i = strnlen(str, max_length + 1);
         if (i > max_length) /* See off-by-one comment above */
         {
+            /* Given that many callers don't even check Chop's return value,
+             * we should NULL-terminate the string here. TODO. */
             return -1;
         }
 
@@ -946,4 +958,147 @@ bool StringAppend(char *dst, const char *src, size_t n)
     }
     dst[i] = '\0';
     return (i < n || !src[j]);
+}
+
+bool StringAppendPromise(char *dst, const char *src, size_t n)
+{
+    int i, j;
+    n--;
+    for (i = 0; i < n && dst[i]; i++)
+    {
+    }
+    for (j = 0; i < n && src[j]; i++, j++)
+    {
+        const char ch = src[j];
+        switch (ch)
+        {
+        case '*':
+            dst[i] = ':';
+            break;
+
+        case '#':
+            dst[i] = '.';
+            break;
+
+        default:
+            dst[i] = ch;
+            break;
+        }
+    }
+    dst[i] = '\0';
+    return (i < n || !src[j]);
+}
+
+bool StringAppendAbbreviatedPromise(char *dst, const char *src, size_t n, const size_t max_fragment)
+{
+    /* check if `src` contains a new line (may happen for "insert_lines") */
+    const char *const nl = strchr(src, '\n');
+    if (NULL == nl)
+    {
+        return StringAppendPromise(dst, src, n);
+    }
+    else
+    {
+        /* `src` contains a newline: abbreviate it by taking the first and last few characters */
+        static const char sep[] = "...";
+        char abbr[sizeof(sep) + 2 * max_fragment];
+        const int head = (nl > src + max_fragment) ? max_fragment : (nl - src);
+        const char * last_line = strrchr(src, '\n') + 1;
+        assert(last_line); /* not max_fragmentULL, we know we have at least one '\n' */
+        const int tail = strlen(last_line);
+        if (tail > max_fragment)
+        {
+            last_line += tail - max_fragment;
+        }
+        memcpy(abbr, src, head);
+        strcpy(abbr + head, sep);
+        strcat(abbr, last_line);
+        return StringAppendPromise(dst, abbr, n);
+    }
+}
+
+/**
+ *  Canonify #src into #dst.
+ *
+ *  @WARNING you must make sure sizeof(dst) is adequate!
+ *
+ *  @return always #dst.
+ */
+char *StringCanonify(char *dst, const char *src)
+{
+    while (*src != '\0')
+    {
+        if (isalnum((unsigned char) *src))
+        {
+            *dst = *src;
+        }
+        else
+        {
+            *dst = '_';
+        }
+
+        src++;
+        dst++;
+    }
+    *dst = '\0';
+
+    return dst;
+}
+
+/**
+ * Append #src to #dst, delimiting with #sep if not at the beginning.
+ *
+ * @param #dst_len In-out parameter. If not NULL it is taken into account as
+ *                 the current length of #dst, and updated as such.
+ *
+ * @retval false if it doesn't fit, in which case nothing gets appended and
+ *               #dst remains as is.
+ */
+bool StringAppendDelimited(char *dst, size_t *dst_len, size_t dst_size,
+                           const char *src, char sep)
+{
+    size_t len     = (dst_len != NULL) ? *dst_len : strlen(dst);
+    size_t src_len = strlen(src);
+
+    if (len + src_len + 1 >= dst_size)
+    {
+        return false;
+    }
+
+    /* Append a separator if dst is not empty. */
+    if (len > 0)
+    {
+        dst[len] = sep;
+        len++;
+    }
+
+    memcpy(&dst[len], src, src_len);
+    len += src_len;
+    dst[len] = '\0';
+
+    if (dst_len != NULL)
+    {
+        *dst_len = len;
+    }
+
+    return true;
+}
+
+/**
+ *  Append #sep if not already there, and then append #leaf.
+ */
+bool PathAppend(char *path, size_t path_size, const char *leaf, char sep)
+{
+    size_t path_len = strlen(path);
+    size_t leaf_len = strlen(leaf);
+
+    if (path_len + 1 + leaf_len >= path_size)
+    {
+        return false;
+    }
+
+    path[path_len] = sep;
+    memcpy(&path[path_len + 1], leaf, leaf_len + 1);
+
+    return true;
 }

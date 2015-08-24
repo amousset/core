@@ -420,20 +420,23 @@ static char *BodyName(const Promise *pp)
         size += strlen(sp);
     }
 
-    for (size_t i = 0; (i < 5) && i < SeqLength(pp->conlist); i++)
+    if (pp->conlist)
     {
-        Constraint *cp = SeqAt(pp->conlist, i);
-
-        if (strcmp(cp->lval, "args") == 0)      /* Exception for args, by symmetry, for locking */
+        for (size_t i = 0; (i < 5) && i < SeqLength(pp->conlist); i++)
         {
-            continue;
-        }
+            Constraint *cp = SeqAt(pp->conlist, i);
 
-        if (size + strlen(cp->lval) < CF_MAXVARSIZE - CF_BUFFERMARGIN)
-        {
-            strcat(name, cp->lval);
-            strcat(name, ".");
-            size += strlen(cp->lval);
+            if (strcmp(cp->lval, "args") == 0)      /* Exception for args, by symmetry, for locking */
+            {
+                continue;
+            }
+
+            if (size + strlen(cp->lval) < CF_MAXVARSIZE - CF_BUFFERMARGIN)
+            {
+                strcat(name, cp->lval);
+                strcat(name, ".");
+                size += strlen(cp->lval);
+            }
         }
     }
 
@@ -533,71 +536,74 @@ void PromiseRuntimeHash(const Promise *pp, const char *salt, unsigned char diges
         EVP_DigestUpdate(&context, salt, strlen(salt));
     }
 
-    for (size_t i = 0; i < SeqLength(pp->conlist); i++)
+    if (pp->conlist)
     {
-        Constraint *cp = SeqAt(pp->conlist, i);
-
-        EVP_DigestUpdate(&context, cp->lval, strlen(cp->lval));
-
-        // don't hash rvals that change (e.g. times)
-        doHash = true;
-
-        for (int j = 0; noRvalHash[j] != NULL; j++)
+        for (size_t i = 0; i < SeqLength(pp->conlist); i++)
         {
-            if (strcmp(cp->lval, noRvalHash[j]) == 0)
+            Constraint *cp = SeqAt(pp->conlist, i);
+
+            EVP_DigestUpdate(&context, cp->lval, strlen(cp->lval));
+
+            // don't hash rvals that change (e.g. times)
+            doHash = true;
+
+            for (int j = 0; noRvalHash[j] != NULL; j++)
             {
-                doHash = false;
-                break;
-            }
-        }
-
-        if (!doHash)
-        {
-            continue;
-        }
-
-        switch (cp->rval.type)
-        {
-        case RVAL_TYPE_SCALAR:
-            EVP_DigestUpdate(&context, cp->rval.item, strlen(cp->rval.item));
-            break;
-
-        case RVAL_TYPE_LIST:
-            for (rp = cp->rval.item; rp != NULL; rp = rp->next)
-            {
-                EVP_DigestUpdate(&context, RlistScalarValue(rp), strlen(RlistScalarValue(rp)));
-            }
-            break;
-
-        case RVAL_TYPE_FNCALL:
-
-            /* Body or bundle */
-
-            fp = (FnCall *) cp->rval.item;
-
-            EVP_DigestUpdate(&context, fp->name, strlen(fp->name));
-
-            for (rp = fp->args; rp != NULL; rp = rp->next)
-            {
-                switch (rp->val.type)
+                if (strcmp(cp->lval, noRvalHash[j]) == 0)
                 {
-                case RVAL_TYPE_SCALAR:
-                    EVP_DigestUpdate(&context, RlistScalarValue(rp), strlen(RlistScalarValue(rp)));
-                    break;
-
-                case RVAL_TYPE_FNCALL:
-                    EVP_DigestUpdate(&context, RlistFnCallValue(rp)->name, strlen(RlistFnCallValue(rp)->name));
-                    break;
-
-                default:
-                    ProgrammingError("Unhandled case in switch");
+                    doHash = false;
                     break;
                 }
             }
-            break;
 
-        default:
-            break;
+            if (!doHash)
+            {
+                continue;
+            }
+
+            switch (cp->rval.type)
+            {
+            case RVAL_TYPE_SCALAR:
+                EVP_DigestUpdate(&context, cp->rval.item, strlen(cp->rval.item));
+                break;
+
+            case RVAL_TYPE_LIST:
+                for (rp = cp->rval.item; rp != NULL; rp = rp->next)
+                {
+                    EVP_DigestUpdate(&context, RlistScalarValue(rp), strlen(RlistScalarValue(rp)));
+                }
+                break;
+
+            case RVAL_TYPE_FNCALL:
+
+                /* Body or bundle */
+
+                fp = (FnCall *) cp->rval.item;
+
+                EVP_DigestUpdate(&context, fp->name, strlen(fp->name));
+
+                for (rp = fp->args; rp != NULL; rp = rp->next)
+                {
+                    switch (rp->val.type)
+                    {
+                    case RVAL_TYPE_SCALAR:
+                        EVP_DigestUpdate(&context, RlistScalarValue(rp), strlen(RlistScalarValue(rp)));
+                        break;
+
+                    case RVAL_TYPE_FNCALL:
+                        EVP_DigestUpdate(&context, RlistFnCallValue(rp)->name, strlen(RlistFnCallValue(rp)->name));
+                        break;
+
+                    default:
+                        ProgrammingError("Unhandled case in switch");
+                        break;
+                    }
+                }
+                break;
+
+            default:
+                break;
+            }
         }
     }
 
@@ -686,7 +692,7 @@ CfLock AcquireLock(EvalContext *ctx, const char *operand, const char *host, time
     char cflast[CF_BUFSIZE] = "";
     snprintf(cflast, CF_BUFSIZE, "last.%.100s.%s.%.100s_%d_%s", PromiseGetBundle(pp)->name, cc_operator, cc_operand, sum, str_digest);
 
-    Log(LOG_LEVEL_DEBUG, "Log for bundle '%s', '%s'", PromiseGetBundle(pp)->name, cflock);
+    Log(LOG_LEVEL_DEBUG, "Locking bundle '%s' with lock '%s'", PromiseGetBundle(pp)->name, cflock);
 
     // Now see if we can get exclusivity to edit the locks
     WaitForCriticalSection(CF_CRITIAL_SECTION);
@@ -838,6 +844,20 @@ void YieldCurrentLock(CfLock lock)
     free(lock.log);
 }
 
+void YieldCurrentLockAndRemoveFromCache(EvalContext *ctx, CfLock lock,
+        const char *operand, const Promise *pp)
+{
+    unsigned char digest[EVP_MAX_MD_SIZE + 1];
+    PromiseRuntimeHash(pp, operand, digest, CF_DEFAULT_DIGEST);
+    char str_digest[CF_HOSTKEY_STRING_SIZE];
+    HashPrintSafe(str_digest, sizeof(str_digest), digest,
+                  CF_DEFAULT_DIGEST, true);
+    
+    YieldCurrentLock(lock);
+    EvalContextPromiseLockCacheRemove(ctx, str_digest);
+}
+
+
 void GetLockName(char *lockname, const char *locktype, const char *base, const Rlist *params)
 {
     int max_sample, count = 0;
@@ -880,6 +900,23 @@ void GetLockName(char *lockname, const char *locktype, const char *base, const R
     }
 }
 
+/**
+ * Returns pointer to the first byte in #buf that is not #c. Returns NULL if
+ * all of #buf contains only bytes of value #c.
+ */
+static void *memcchr(const void *buf, int c, size_t buf_size)
+{
+    const char *cbuf = buf;
+    for (size_t i = 0; i < buf_size; i++)
+    {
+        if (cbuf[i] != c)
+        {
+            return (void *) &cbuf[i];                    /* cast-away const */
+        }
+    }
+    return NULL;
+}
+
 static void CopyLockDatabaseAtomically(const char *from, const char *to,
                                        const char *from_pretty_name, const char *to_pretty_name)
 {
@@ -914,16 +951,36 @@ static void CopyLockDatabaseAtomically(const char *from, const char *to,
             break;
         }
 
-        int write_status = write(to_fd, data, read_status);
-        if (write_status < 0)
+        /* Is the file sparse? */
+        if (memcchr(data, '\0', read_status) == NULL)    /* is file sparse? */
         {
-            Log(LOG_LEVEL_WARNING, "Could not write to %s. (write: '%s')", to_pretty_name, GetErrorStr());
-            goto cleanup_4;
+            /*
+             * TODO seek()ing is not enough to preserve sparse-ness on
+             * windows. TODO fix according to:
+             * https://msdn.microsoft.com/en-us/library/windows/desktop/aa365566%28v=vs.85%29.aspx
+             */
+            off_t seek_status = lseek(to_fd, read_status, SEEK_CUR);
+            if (seek_status == (off_t) -1)
+            {
+                Log(LOG_LEVEL_WARNING,
+                    "Could not seek in file '%s' (lseek: %s)",
+                    to_pretty_name, GetErrorStr());
+                goto cleanup_4;
+            }
         }
-        else if (write_status == 0)
+        else                                          /* file is not sparse */
         {
-            Log(LOG_LEVEL_WARNING, "Could not write to %s. (write: 'Unknown error')", to_pretty_name);
-            goto cleanup_4;
+            int write_status = write(to_fd, data, read_status);
+            if (write_status < 0)
+            {
+                Log(LOG_LEVEL_WARNING, "Could not write to %s. (write: '%s')", to_pretty_name, GetErrorStr());
+                goto cleanup_4;
+            }
+            else if (write_status == 0)
+            {
+                Log(LOG_LEVEL_WARNING, "Could not write to %s. (write: 'Unknown error')", to_pretty_name);
+                goto cleanup_4;
+            }
         }
     }
 
