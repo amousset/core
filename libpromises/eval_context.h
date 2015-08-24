@@ -130,6 +130,7 @@ ClassTableIterator *EvalContextClassTableIteratorNewGlobal(const EvalContext *ct
 ClassTableIterator *EvalContextClassTableIteratorNewLocal(const EvalContext *ctx);
 
 void EvalContextClear(EvalContext *ctx);
+JsonElement *GetStackContext(EvalContext *ctx);
 
 void EvalContextStackPushBundleFrame(EvalContext *ctx, const Bundle *owner, const Rlist *args, bool inherits_previous);
 void EvalContextStackPushBodyFrame(EvalContext *ctx, const Promise *caller, const Body *body, const Rlist *args);

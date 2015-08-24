@@ -1131,6 +1131,37 @@ void EvalContextStackPushPromiseFrame(EvalContext *ctx, const Promise *owner, bo
     EvalContextVariablePutSpecial(ctx, SPECIAL_SCOPE_THIS, "namespace", PromiseGetNamespace(owner), CF_DATA_TYPE_STRING, "source=promise");
 }
 
+JsonElement *GetStackContext(EvalContext *ctx) {
+	JsonElement *stack = JsonArrayCreate(10);
+
+	for (size_t i = 0; i < SeqLength(ctx->stack); i++)
+	{
+	    StackFrame *frame = SeqAt(ctx->stack, i);
+	    switch (frame->type)
+	    {
+	    case STACK_FRAME_TYPE_BODY:
+	        break;
+ 	    case STACK_FRAME_TYPE_BUNDLE:
+	        break;
+ 	    case STACK_FRAME_TYPE_PROMISE_ITERATION:
+	        break;
+ 	    case STACK_FRAME_TYPE_PROMISE:
+ 	    {
+ 	    	JsonElement *inner = JsonObjectCreate(10);
+ 	    	JsonObjectAppendString(inner, "promiser", frame->data.promise.owner->promiser);
+	     	//if (strcmp(frame->data.promise.owner->parent_promise_type->name, "methods") == 0) {
+	     	//	RlistAppendScalar(&callers, frame->data.promise.owner->promiser);
+	      	//
+ 	    	JsonArrayAppendObject(stack, inner);
+	        break;
+ 	    }
+ 	    case STACK_FRAME_TYPE_PROMISE_TYPE:
+	      	break;
+	    }
+	}
+	return stack;
+}
+
 Promise *EvalContextStackPushPromiseIterationFrame(EvalContext *ctx, size_t iteration_index, const PromiseIterator *iter_ctx)
 {
     assert(LastStackFrame(ctx, 0) && LastStackFrame(ctx, 0)->type == STACK_FRAME_TYPE_PROMISE);
