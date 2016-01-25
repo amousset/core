@@ -172,7 +172,7 @@ int ReceiveTransaction(ConnectionInfo *conn_info, char *buffer, int *more)
          * In order to make sure that file transfer is reliable we have to
          * close connection to avoid broken packages being received. */
         conn_info->status = CONNECTIONINFO_STATUS_BROKEN;
-        return ret;
+        return -1;
     }
     else if (ret != CF_INBAND_OFFSET)
     {
