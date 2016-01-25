@@ -837,7 +837,7 @@ static PromiseResult SourceSearchAndCopy(EvalContext *ctx, const char *from, cha
             }
         }
 
-        if (attr.copy.purge)    /* Purge this file */
+        if (attr.copy.purge)    /* Do not purge this file */
         {
             AppendItem(&namecache, dirp->d_name, NULL);
         }
@@ -973,6 +973,15 @@ static PromiseResult SourceSearchAndCopy(EvalContext *ctx, const char *from, cha
         else
         {
             result = PromiseResultUpdate(result, VerifyCopy(ctx, newfrom, newto, attr, pp, inode_cache, conn));
+        }
+        
+        if (conn != NULL &&
+            conn->conn_info->status != CONNECTIONINFO_STATUS_ESTABLISHED)
+        {
+            cfPS(ctx, LOG_LEVEL_INFO, PROMISE_RESULT_INTERRUPTED, pp,
+                 attr, "connection error");
+            AbstractDirClose(dirh);
+            return PROMISE_RESULT_INTERRUPTED;
         }
     }
 
