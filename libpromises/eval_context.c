@@ -2065,7 +2065,7 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
 {
     assert(ref->lval);
 
-    printf("VariableResolve:%s:%s:%s\n", ref->ns, ref->scope, ref->lval);
+    //printf("VariableResolve:%s:%s:%s\n", ref->ns, ref->scope, ref->lval);
 
     if (!VarRefIsQualified(ref))
     {
@@ -2097,7 +2097,7 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
             }
         }
     }
-    printf("E0\n");
+    //printf("E0\n");
 
 
     //StackFrame *last_bundle = LastStackFrameByType(ctx, STACK_FRAME_TYPE_PROMISE);
@@ -2105,7 +2105,7 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
     //return frame ? frame->data.bundle.owner : NULL;
     Bundle *last_bundle = EvalContextStackCurrentBundle(ctx);
 
-    printf("E1\n");
+    //printf("E1\n");
 
 
 /*
@@ -2184,9 +2184,9 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
 
         VariableTable *table2 = GetVariableTableForScope(ctx, ref->ns, "const");
         if (table2)
-    printf("ARRIVE CONST\n");
+    //printf("ARRIVE CONST\n");
         {
-            printf("CONSTDEB:%s:%s:%s\n", ref->ns, ref->scope, ref->lval);
+            //printf("CONSTDEB:%s:%s:%s\n", ref->ns, ref->scope, ref->lval);
 
             //VariableTableIterator *iter = VariableTableIteratorNew(table, ref->ns, ref->scope, NULL);
             //Variable *foreign_var = NULL;
@@ -2205,19 +2205,19 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
             var = VariableTableGet(table2, ref);
             if (var)
             {
-                printf("E50\n");
+                //printf("E50\n");
                 return var;
             }
             else if (ref->num_indices > 0)
             {
-                printf("E51\n");
+                //printf("E51\n");
                 VarRef *base_ref = VarRefCopyIndexless(ref);
                 var = VariableTableGet(table2, base_ref);
                 VarRefDestroy(base_ref);
 
                 if (var && var->type == CF_DATA_TYPE_CONTAINER)
                 {
-                    //return var;
+                    return var;
                 }
             }
 
@@ -2234,19 +2234,19 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
                 Variable *var = VariableTableGet(table2, ref3);
                 if (var)
                 {
-                    printf("E50\n");
+                    //printf("E50\n");
                     return var;
                 }
                 else if (ref->num_indices > 0)
                 {
-                    printf("E51\n");
+                    //printf("E51\n");
                     VarRef *base_ref = VarRefCopyIndexless(ref3);
                     var = VariableTableGet(table2, base_ref);
                     VarRefDestroy(base_ref);
 
                     if (var && var->type == CF_DATA_TYPE_CONTAINER)
                     {
-                        //return var;
+                        return var;
                     }
                 }
             }
@@ -2254,7 +2254,7 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
 
 
 
-printf("BROUCOUILLE\n");
+//printf("BROUCOUILLE\n");
 
 
 // Only for promises, keep it for bundles ?
