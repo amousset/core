@@ -256,7 +256,7 @@ PromiseResult ExpandPromise(EvalContext *ctx, const Promise *pp,
      *    (including body inheritance). */
     Promise *pcopy = DeRefCopyPromise(ctx, pp);
 
-    EvalContextStackPushPromiseFrame(ctx, pcopy, true);
+    EvalContextStackPushPromiseFrame(ctx, pcopy, false);
     PromiseIterator *iterctx = PromiseIteratorNew(pcopy);
 
     /* 2. Parse all strings (promiser-promisee-constraints), find all
@@ -354,11 +354,15 @@ static Rval ExpandListEntry(EvalContext *ctx,
                 VarRef *ref = VarRefParseFromScope(naked, scope);
 
                 DataType value_type;
+
+                //printf("BEGIN TROUBLE\n");
+
                 const void *value = EvalContextVariableGet(ctx, ref, &value_type);
                 VarRefDestroy(ref);
 
                 if (value_type != CF_DATA_TYPE_NONE)     /* variable found? */
                 {
+                    //printf("WE FOUND LOVE\n");
                     return ExpandPrivateRval(ctx, ns, scope, value,
                                              DataTypeToRvalType(value_type));
                 }

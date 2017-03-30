@@ -2000,11 +2000,14 @@ static void VarRefStackQualify(const EvalContext *ctx, VarRef *ref)
         break;
 
     case STACK_FRAME_TYPE_BUNDLE:
+        printf("VariableQualify:%s:%s:%s:%s:%s\n", ref->ns, ref->scope, ref->lval, last_frame->data.bundle.owner->name);
+
         VarRefQualify(ref, last_frame->data.bundle.owner->ns, last_frame->data.bundle.owner->name);
         break;
 
     case STACK_FRAME_TYPE_PROMISE:
     case STACK_FRAME_TYPE_PROMISE_ITERATION:
+        printf("VariableQualify\n");
         VarRefQualify(ref, NULL, SpecialScopeToString(SPECIAL_SCOPE_THIS));
         break;
     }
@@ -2062,6 +2065,8 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
 {
     assert(ref->lval);
 
+    printf("VariableResolve:%s:%s:%s\n", ref->ns, ref->scope, ref->lval);
+
     if (!VarRefIsQualified(ref))
     {
         VarRef *qref = VarRefCopy(ref);
@@ -2072,9 +2077,10 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
     }
 
     VariableTable *table = GetVariableTableForScope(ctx, ref->ns, ref->scope);
+    Variable *var;
     if (table)
     {
-        Variable *var = VariableTableGet(table, ref);
+        var = VariableTableGet(table, ref);
         if (var)
         {
             return var;
@@ -2091,6 +2097,186 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
             }
         }
     }
+    printf("E0\n");
+
+
+    //StackFrame *last_bundle = LastStackFrameByType(ctx, STACK_FRAME_TYPE_PROMISE);
+
+    //return frame ? frame->data.bundle.owner : NULL;
+    Bundle *last_bundle = EvalContextStackCurrentBundle(ctx);
+
+    printf("E1\n");
+
+
+/*
+    for (size_t i = 0; i < SeqLength(ctx->stack); i++)
+    {
+        StackFrame *frame = SeqAt(ctx->stack, i);
+        switch (frame->type)
+        {
+        case STACK_FRAME_TYPE_BODY:
+            var = VariableTableGet(frame->data.body.vars, ref);
+            if (var)
+            {
+                return var;
+            }
+            else if (ref->num_indices > 0)
+            {
+                VarRef *base_ref = VarRefCopyIndexless(ref);
+                var = VariableTableGet(table, base_ref);
+                VarRefDestroy(base_ref);
+
+                if (var && var->type == CF_DATA_TYPE_CONTAINER)
+                {
+                    return var;
+                }
+            }
+            break;
+
+        case STACK_FRAME_TYPE_BUNDLE:
+            var = VariableTableGet(frame->data.bundle.vars, ref);
+            if (var)
+            {
+                return var;
+            }
+            else if (ref->num_indices > 0)
+            {
+                VarRef *base_ref = VarRefCopyIndexless(ref);
+                var = VariableTableGet(table, base_ref);
+                VarRefDestroy(base_ref);
+
+                if (var && var->type == CF_DATA_TYPE_CONTAINER)
+                {
+                    return var;
+                }
+            }
+            break;
+
+        case STACK_FRAME_TYPE_PROMISE_ITERATION:
+            break;
+
+        case STACK_FRAME_TYPE_PROMISE:
+            var = VariableTableGet(frame->data.promise.vars, ref);
+            if (var)
+            {
+                return var;
+            }
+            else if (ref->num_indices > 0)
+            {
+                VarRef *base_ref = VarRefCopyIndexless(ref);
+                var = VariableTableGet(table, base_ref);
+                VarRefDestroy(base_ref);
+
+                if (var && var->type == CF_DATA_TYPE_CONTAINER)
+                {
+                    return var;
+                }
+            }
+            break;
+
+        case STACK_FRAME_TYPE_PROMISE_TYPE:
+            break;
+        }
+    }
+
+*/
+
+
+        VariableTable *table2 = GetVariableTableForScope(ctx, ref->ns, "const");
+        if (table2)
+    printf("ARRIVE CONST\n");
+        {
+            printf("CONSTDEB:%s:%s:%s\n", ref->ns, ref->scope, ref->lval);
+
+            //VariableTableIterator *iter = VariableTableIteratorNew(table, ref->ns, ref->scope, NULL);
+            //Variable *foreign_var = NULL;
+            //while ((foreign_var = VariableTableIteratorNext(iter)))
+            //{
+                /* TODO why is tags NULL here? Shouldn't it be an exact copy of
+                 * foreign_var->tags? */
+                //printf("CONTENT:%s:%s:%s:%s\n", foreign_var->ref->ns, foreign_var->ref->scope, foreign_var->ref->lval, RvalToString(foreign_var->rval));
+
+                //Variable *localized_var = VariableNew(VarRefCopyLocalized(foreign_var->ref),
+                //                                      RvalCopy(foreign_var->rval), foreign_var->type,
+                //                                      NULL, foreign_var->promise);
+            //}
+            //VariableTableIteratorDestroy(iter);
+
+            var = VariableTableGet(table2, ref);
+            if (var)
+            {
+                printf("E50\n");
+                return var;
+            }
+            else if (ref->num_indices > 0)
+            {
+                printf("E51\n");
+                VarRef *base_ref = VarRefCopyIndexless(ref);
+                var = VariableTableGet(table2, base_ref);
+                VarRefDestroy(base_ref);
+
+                if (var && var->type == CF_DATA_TYPE_CONTAINER)
+                {
+                    //return var;
+                }
+            }
+
+
+            if (last_bundle && strcmp(ref->scope, "this") ==0) {
+                VarRef *ref2 = VarRefCopy(ref);
+
+                // cas promesses / bundle mal distingué
+//last_bundle->name
+                ref2->scope = xstrdup(last_bundle->name);
+
+                VarRef *ref3 = VarRefCopy(ref2);
+
+                Variable *var = VariableTableGet(table2, ref3);
+                if (var)
+                {
+                    printf("E50\n");
+                    return var;
+                }
+                else if (ref->num_indices > 0)
+                {
+                    printf("E51\n");
+                    VarRef *base_ref = VarRefCopyIndexless(ref3);
+                    var = VariableTableGet(table2, base_ref);
+                    VarRefDestroy(base_ref);
+
+                    if (var && var->type == CF_DATA_TYPE_CONTAINER)
+                    {
+                        //return var;
+                    }
+                }
+            }
+    }
+
+
+
+printf("BROUCOUILLE\n");
+
+
+// Only for promises, keep it for bundles ?
+
+
+    //frame->data.promise.vars = VariableTableCopyLocalized(ctx->global_variables,
+    //                                                      EvalContextStackCurrentBundle(ctx)->ns,
+    //                                                      EvalContextStackCurrentBundle(ctx)->name);
+
+    //VariableTableIterator *iter = VariableTableIteratorNew(table, ns, scope, NULL);
+    //Variable *foreign_var = NULL;
+    //while ((foreign_var = VariableTableIteratorNext(iter)))
+    //{
+    //    /* TODO why is tags NULL here? Shouldn't it be an exact copy of
+    //     * foreign_var->tags? */
+    //    Variable *localized_var = VariableNew(VarRefCopyLocalized(foreign_var->ref),
+    //                                          RvalCopy(foreign_var->rval), foreign_var->type,
+    //                                          NULL, foreign_var->promise);
+
+//        VarMapInsert(localized_copy->vars, localized_var->ref, localized_var);
+//    }
+
 
     return NULL;
 }
