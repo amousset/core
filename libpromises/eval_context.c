@@ -2060,6 +2060,7 @@ bool EvalContextVariablePut(EvalContext *ctx,
  */
 static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
 {
+    //printf("POuTOU1:%s:%s:%s\n", ref->ns, ref->scope, ref->lval);
     assert(ref->lval);
 
     if (!VarRefIsQualified(ref))
@@ -2070,7 +2071,7 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
         VarRefDestroy(qref);
         return ret;
     }
-
+    //printf("POuTOU2:%s:%s:%s\n", ref->ns, ref->scope, ref->lval);
     VariableTable *table = GetVariableTableForScope(ctx, ref->ns, ref->scope);
     Variable *var;
     if (table)
@@ -2098,6 +2099,29 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
     VariableTable *table2 = GetVariableTableForScope(ctx, ref->ns, "none");
         if (table2)
         {
+
+
+/*
+
+                        printf("CONSTDEB:%s:%s:%s\n", ref->ns, ref->scope, ref->lval);
+
+                        VariableTableIterator *iter = VariableTableIteratorNew(table, NULL, NULL, NULL);
+                        Variable *foreign_var = NULL;
+                        while ((foreign_var = VariableTableIteratorNext(iter)))
+                        {
+
+                            printf("CONTENT:%s:%s:%s\n", foreign_var->ref->ns, foreign_var->ref->scope, foreign_var->ref->lval);
+
+                            //Variable *localized_var = VariableNew(VarRefCopyLocalized(foreign_var->ref),
+                            //                                      RvalCopy(foreign_var->rval), foreign_var->type,
+                            //                                      NULL, foreign_var->promise);
+                        }
+                        VariableTableIteratorDestroy(iter);
+
+
+*/
+
+
             var = VariableTableGet(table2, ref);
             if (var)
             {
