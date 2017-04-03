@@ -1770,9 +1770,10 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
     }
 
     VariableTable *table = GetVariableTableForScope(ctx, ref->ns, ref->scope);
+    Variable *var;
     if (table)
     {
-        Variable *var = VariableTableGet(table, ref);
+        var = VariableTableGet(table, ref);
         if (var)
         {
             return var;
@@ -1786,6 +1787,60 @@ static Variable *VariableResolve(const EvalContext *ctx, const VarRef *ref)
             if (var && var->type == CF_DATA_TYPE_CONTAINER)
             {
                 return var;
+            }
+        }
+    }
+    VariableTable *table2 = GetVariableTableForScope(ctx, ref->ns, "none");
+    if (table2)
+    {
+        Variable *var;
+        if (strcmp(ref->scope, "this") == 0) {
+
+            for (size_t i = 0; i < SeqLength(ctx->stack); i++)
+            {
+                StackFrame *frame = LastStackFrame(ctx, i);
+                if (frame) {
+                    if (frame->type == STACK_FRAME_TYPE_BUNDLE)
+                    {
+                        VarRef *ref2 = VarRefCopy(ref);
+                        VarRefQualify(ref2, frame->data.bundle.owner->ns, frame->data.bundle.owner->name);
+
+                        var = VariableTableGet(table2, ref2);
+
+                        if (var) {
+                            return var;
+                        }
+                        else if (ref2->num_indices > 0)
+                        {
+                            VarRef *base_ref = VarRefCopyIndexless(ref2);
+                            var = VariableTableGet(table2, base_ref);
+                            VarRefDestroy(base_ref);
+
+                            if (var && var->type == CF_DATA_TYPE_CONTAINER)
+                            {
+                                return var;
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            var = VariableTableGet(table2, ref);
+
+            if (var)
+            {
+                return var;
+            }
+            else if (ref->num_indices > 0)
+            {
+                VarRef *base_ref = VarRefCopyIndexless(ref);
+                var = VariableTableGet(table2, base_ref);
+                VarRefDestroy(base_ref);
+
+                if (var && var->type == CF_DATA_TYPE_CONTAINER)
+                {
+                    return var;
+                }
             }
         }
     }

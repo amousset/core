@@ -175,7 +175,7 @@ static PromiseResult ExpandPromiseAndDo(EvalContext *ctx, const Promise *pp,
 {
     const char *handle = PromiseGetHandle(pp);
 
-    EvalContextStackPushPromiseFrame(ctx, pp, true);
+    EvalContextStackPushPromiseFrame(ctx, pp, false);
 
     PromiseIterator *iter_ctx = NULL;
     size_t i = 0;
