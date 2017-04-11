@@ -99,18 +99,19 @@ Variable *VariableTableGet(const VariableTable *table, const VarRef *ref)
 {
     Variable *v = VarMapGet(table->vars, ref);
 
-    char *ref_s = VarRefToString(ref, true);              /* TODO optimise */
-
     if (v != NULL)
     {
+        char *ref_s = VarRefToString(ref, true);
         CF_ASSERT(v->rval.item != NULL || DataTypeIsIterable(v->type),
                   "VariableTableGet(%s): "
                   "Only iterables (Rlists) are allowed to be NULL",
                   ref_s);
+        free(ref_s);
     }
 
     if (LogModuleEnabled(LOG_MOD_VARTABLE))
     {
+        char *ref_s = VarRefToString(ref, true);
         Buffer *buf = BufferNew();
         BufferPrintf(buf, "VariableTableGet(%s): %s", ref_s,
                      v ? DataTypeToString(v->type) : "NOT FOUND");
@@ -135,9 +136,9 @@ Variable *VariableTableGet(const VariableTable *table, const VarRef *ref)
         LogDebug(LOG_MOD_VARTABLE, "%s", BufferGet(buf));
 
         BufferDestroy(buf);
+        free(ref_s);
     }
 
-    free(ref_s);
     return v;
 }
 
