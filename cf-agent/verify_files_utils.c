@@ -2822,7 +2822,7 @@ static AgentConnection *FileCopyConnectionOpen(const EvalContext *ctx,
         else                    /* not found, open and cache new connection */
         {
             int err = 0;
-            conn = ServerConnection(servername, port, conntimeout,
+            conn = ServerConnection(servername, port, EvalContextGetRestrictKeys(ctx), conntimeout,
                                     flags, &err);
 
             /* WARNING: if cache already has non-idle connections to that
@@ -2849,7 +2849,7 @@ static AgentConnection *FileCopyConnectionOpen(const EvalContext *ctx,
     else
     {
         int err = 0;
-        conn = ServerConnection(servername, port, conntimeout,
+        conn = ServerConnection(servername, port, EvalContextGetRestrictKeys(ctx), conntimeout,
                                 flags, &err);
         return conn;
     }
